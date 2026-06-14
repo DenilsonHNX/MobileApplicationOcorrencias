@@ -1,0 +1,45 @@
+name: ocorrencias_app
+description: "Plataforma de Partilha de Ocorrências em Vídeo"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # Rede
+  http: ^1.2.2
+
+  # Reprodução de vídeo
+  video_player: ^2.8.6
+
+  # Seleção de mídia (câmara + galeria)
+  image_picker: ^1.1.2
+
+  # Gestão de estado
+  provider: ^6.1.2
+
+  # Armazenamento local (token JWT)
+  shared_preferences: ^2.3.2
+
+  # Cache de imagens
+  cached_network_image: ^3.3.1
+
+  # Utilitários
+  intl: ^0.19.0
+  path: ^1.9.0
+
+  # Permissões
+  permission_handler: ^11.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

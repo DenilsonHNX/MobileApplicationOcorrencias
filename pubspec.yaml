@@ -43,3 +43,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/certs/ca.crt
+    - assets/certs/app.crt
+    - assets/certs/app.key

@@ -37,8 +37,7 @@ class AuthProvider extends ChangeNotifier {
   Future<void> login(String email, String password) async {
     final data = await AuthService.login(email: email, password: password);
     _token = data['token'] as String;
-    // Backend retorna 'user', não 'utilizador'
-    final userData = data['user'] as Map<String, dynamic>? ?? {};
+    final userData = data['utilizador'] as Map<String, dynamic>? ?? {};
     _user = UserModel.fromJson(userData);
     await StorageService.saveToken(_token!);
     await StorageService.saveUserInfo(_user!.id, _user!.nome);
@@ -49,8 +48,7 @@ class AuthProvider extends ChangeNotifier {
   Future<void> registar(String nome, String email, String password) async {
     final data = await AuthService.registar(nome: nome, email: email, password: password);
     _token = data['token'] as String;
-    // Backend retorna 'user', não 'utilizador'
-    final userData = data['user'] as Map<String, dynamic>? ?? {};
+    final userData = data['utilizador'] as Map<String, dynamic>? ?? {};
     _user = UserModel.fromJson(userData);
     await StorageService.saveToken(_token!);
     await StorageService.saveUserInfo(_user!.id, _user!.nome);

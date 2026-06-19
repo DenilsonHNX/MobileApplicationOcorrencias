@@ -20,12 +20,12 @@ class CommentModel {
       id: json['id'] ?? '',
       videoId: json['videoId'] ?? '',
       userId: json['userId'] ?? '',
-      // Backend usa 'autorNome', não 'nomeAutor'
-      nomeAutor: json['autorNome'] ?? json['nomeAutor'] ?? 'Utilizador',
+      nomeAutor: json['nomeAutor'] ??
+          (json['autor'] is Map ? json['autor']['nome'] : null) ??
+          'Utilizador',
       texto: json['texto'] ?? '',
-      // Backend usa 'criadoEm', não 'dataCriacao'
-      dataCriacao: (json['criadoEm'] ?? json['dataCriacao']) != null
-          ? DateTime.tryParse((json['criadoEm'] ?? json['dataCriacao']).toString()) ?? DateTime.now()
+      dataCriacao: json['dataCriacao'] != null
+          ? DateTime.tryParse(json['dataCriacao'].toString()) ?? DateTime.now()
           : DateTime.now(),
     );
   }

@@ -27,14 +27,6 @@ class _UploadScreenState extends State<UploadScreen> {
   bool _loading = false;
 
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<VideoProvider>().loadCategorias();
-    });
-  }
-
-  @override
   void dispose() {
     _tituloCtrl.dispose();
     _descCtrl.dispose();
@@ -225,32 +217,18 @@ class _UploadScreenState extends State<UploadScreen> {
                   const SizedBox(height: 12),
 
                   // Categoria
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.white10,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.category_outlined, color: Colors.white38),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: DropdownButton<CategoryModel>(
-                            value: _categoria,
-                            isExpanded: true,
-                            underline: const SizedBox.shrink(),
-                            dropdownColor: const Color(0xFF1A1A2E),
-                            hint: const Text('Categoria *', style: TextStyle(color: Colors.white38)),
-                            items: categorias.map((c) => DropdownMenuItem(
+                  DropdownButtonFormField<CategoryModel>(
+                    initialValue: _categoria,
+                    dropdownColor: const Color(0xFF1A1A2E),
+                    decoration: _inputDecoration('Categoria *', Icons.category_outlined),
+                    items: categorias
+                        .map((c) => DropdownMenuItem(
                               value: c,
                               child: Text(c.label, style: const TextStyle(color: Colors.white)),
-                            )).toList(),
-                            onChanged: (v) => setState(() => _categoria = v),
-                          ),
-                        ),
-                      ],
-                    ),
+                            ))
+                        .toList(),
+                    onChanged: (v) => setState(() => _categoria = v),
+                    hint: const Text('Selecione uma categoria', style: TextStyle(color: Colors.white38)),
                   ),
 
                   const SizedBox(height: 24),

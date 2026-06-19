@@ -20,11 +20,10 @@ class UserModel {
       id: json['id'] ?? '',
       nome: json['nome'] ?? '',
       email: json['email'] ?? '',
-      role: json['role'] ?? 'user',
+      role: json['role'] ?? 'utilizador',
       estado: json['estado'] ?? 'ativo',
-      // Backend usa 'criadoEm', não 'dataCriacao'
-      dataCriacao: (json['criadoEm'] ?? json['dataCriacao']) != null
-          ? DateTime.tryParse((json['criadoEm'] ?? json['dataCriacao']).toString()) ?? DateTime.now()
+      dataCriacao: json['dataCriacao'] != null
+          ? DateTime.tryParse(json['dataCriacao'].toString()) ?? DateTime.now()
           : DateTime.now(),
     );
   }

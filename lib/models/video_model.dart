@@ -4,10 +4,9 @@ class VideoModel {
   final String id;
   final String titulo;
   final String descricao;
-  final String videoUrl;
-  final String? thumbnailUrl;
-  final String? hlsUrl;
-  final String userId;
+  final String? thumbnail;
+  final String? streamUrlFull;
+  final String? hlsUrlFull;
   final String nomeAutor;
   final String? categoriaId;
   final String? categoriaNome;
@@ -19,15 +18,15 @@ class VideoModel {
   final String estado;
   final DateTime dataCriacao;
   bool isLiked;
+  bool isGuardado;
 
   VideoModel({
     required this.id,
     required this.titulo,
     required this.descricao,
-    required this.videoUrl,
-    this.thumbnailUrl,
-    this.hlsUrl,
-    required this.userId,
+    this.thumbnail,
+    this.streamUrlFull,
+    this.hlsUrlFull,
     required this.nomeAutor,
     this.categoriaId,
     this.categoriaNome,
@@ -39,20 +38,21 @@ class VideoModel {
     required this.estado,
     required this.dataCriacao,
     this.isLiked = false,
+    this.isGuardado = false,
   });
 
   factory VideoModel.fromJson(Map<String, dynamic> json) {
+    final autor = json['autor'];
+    final nomeAutor = (autor is Map ? autor['nome'] : null) ?? 'Utilizador';
+
     return VideoModel(
       id: json['id'] ?? '',
       titulo: json['titulo'] ?? '',
       descricao: json['descricao'] ?? '',
-      videoUrl: json['videoUrl'] ?? '',
-      thumbnailUrl: json['thumbnailUrl'],
-      hlsUrl: json['hlsUrl'],
-      userId: json['userId'] ?? '',
-      nomeAutor: json['nomeAutor'] ??
-          (json['autor'] is Map ? json['autor']['nome'] : null) ??
-          'Utilizador',
+      thumbnail: json['thumbnail'],
+      streamUrlFull: json['streamUrl'],
+      hlsUrlFull: json['hlsUrl'],
+      nomeAutor: nomeAutor,
       categoriaId: json['categoriaId'],
       categoriaNome: json['categoriaNome'] ??
           (json['categoria'] is Map ? json['categoria']['nome'] : null),
@@ -60,38 +60,38 @@ class VideoModel {
           ? Map<String, dynamic>.from(json['localizacao'] as Map)
           : null,
       duracao: (json['duracao'] ?? 0).toDouble(),
-      visualizacoes: json['visualizacoes'] ?? 0,
+      visualizacoes: json['views'] ?? json['visualizacoes'] ?? 0,
       likes: json['likes'] ?? 0,
       comentarios: json['comentarios'] ?? 0,
       estado: json['estado'] ?? 'ativo',
-      dataCriacao: json['dataCriacao'] != null
-          ? DateTime.tryParse(json['dataCriacao'].toString()) ?? DateTime.now()
+      dataCriacao: (json['criadoEm'] ?? json['dataCriacao']) != null
+          ? DateTime.tryParse((json['criadoEm'] ?? json['dataCriacao']).toString()) ?? DateTime.now()
           : DateTime.now(),
-      isLiked: json['isLiked'] ?? false,
+      isLiked: json['likedPorMim'] ?? json['isLiked'] ?? false,
+      isGuardado: json['guardadoPorMim'] ?? json['isGuardado'] ?? false,
     );
   }
 
   String get fullStreamUrl {
-    if (hlsUrl != null && hlsUrl!.isNotEmpty) {
-      return ApiConfig.hlsUrl(hlsUrl!);
-    }
+    if (hlsUrlFull != null && hlsUrlFull!.isNotEmpty) return hlsUrlFull!;
+    if (streamUrlFull != null && streamUrlFull!.isNotEmpty) return streamUrlFull!;
     return ApiConfig.streamUrl(id);
   }
 
   String? get fullThumbnailUrl {
-    if (thumbnailUrl == null || thumbnailUrl!.isEmpty) return null;
-    return ApiConfig.thumbnailUrl(thumbnailUrl!);
+    if (thumbnail == null || thumbnail!.isEmpty) return null;
+    if (thumbnail!.startsWith('http')) return thumbnail;
+    return '${ApiConfig.baseUrl}/$thumbnail';
   }
 
-  VideoModel copyWith({bool? isLiked, int? likes, int? comentarios, int? visualizacoes}) {
+  VideoModel copyWith({bool? isLiked, bool? isGuardado, int? likes, int? comentarios, int? visualizacoes}) {
     return VideoModel(
       id: id,
       titulo: titulo,
       descricao: descricao,
-      videoUrl: videoUrl,
-      thumbnailUrl: thumbnailUrl,
-      hlsUrl: hlsUrl,
-      userId: userId,
+      thumbnail: thumbnail,
+      streamUrlFull: streamUrlFull,
+      hlsUrlFull: hlsUrlFull,
       nomeAutor: nomeAutor,
       categoriaId: categoriaId,
       categoriaNome: categoriaNome,
@@ -103,6 +103,7 @@ class VideoModel {
       estado: estado,
       dataCriacao: dataCriacao,
       isLiked: isLiked ?? this.isLiked,
+      isGuardado: isGuardado ?? this.isGuardado,
     );
   }
 }

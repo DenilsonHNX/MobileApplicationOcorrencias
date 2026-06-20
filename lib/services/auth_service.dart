@@ -1,7 +1,7 @@
 import 'dart:convert';
 import '../config/api_config.dart';
 import '../models/user_model.dart';
-import 'http_client.dart';
+import 'mtls_client.dart';
 
 class AuthService {
   static Future<Map<String, dynamic>> registar({
@@ -9,7 +9,7 @@ class AuthService {
     required String email,
     required String password,
   }) async {
-    final client = await SecureClient.instance;
+    final client = await MtlsClient.get();
     final response = await client.post(
       Uri.parse('${ApiConfig.apiUrl}/auth/registar'),
       headers: {'Content-Type': 'application/json'},
@@ -17,7 +17,7 @@ class AuthService {
     );
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     if (response.statusCode != 201) {
-      throw Exception(data['erro'] ?? 'Erro ao criar conta');
+      throw Exception(data['error'] ?? 'Erro ao criar conta');
     }
     return data;
   }
@@ -26,7 +26,7 @@ class AuthService {
     required String email,
     required String password,
   }) async {
-    final client = await SecureClient.instance;
+    final client = await MtlsClient.get();
     final response = await client.post(
       Uri.parse('${ApiConfig.apiUrl}/auth/login'),
       headers: {'Content-Type': 'application/json'},
@@ -34,21 +34,21 @@ class AuthService {
     );
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     if (response.statusCode != 200) {
-      throw Exception(data['erro'] ?? 'Credenciais inválidas');
+      throw Exception(data['error'] ?? 'Credenciais inválidas');
     }
     return data;
   }
 
   static Future<UserModel> getPerfil(String token) async {
-    final client = await SecureClient.instance;
+    final client = await MtlsClient.get();
     final response = await client.get(
       Uri.parse('${ApiConfig.apiUrl}/auth/perfil'),
       headers: {'Authorization': 'Bearer $token'},
     );
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     if (response.statusCode != 200) {
-      throw Exception(data['erro'] ?? 'Sessão expirada');
+      throw Exception(data['error'] ?? 'Sessão expirada');
     }
-    return UserModel.fromJson(data['utilizador'] ?? data);
+    return UserModel.fromJson(data);
   }
 }

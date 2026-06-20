@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../models/video_model.dart';
+import '../config/api_config.dart';
 import '../providers/auth_provider.dart';
 import '../providers/video_provider.dart';
 import 'comments_sheet.dart';
@@ -115,6 +117,37 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
     try {
       await context.read<VideoProvider>().toggleLike(widget.index, auth.token!);
     } catch (_) {}
+  }
+
+  Future<void> _toggleGuardar() async {
+    final auth = context.read<AuthProvider>();
+    if (!auth.isAuthenticated) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Inicie sessão para guardar vídeos.')),
+      );
+      return;
+    }
+    try {
+      final guardado = await context.read<VideoProvider>().toggleGuardar(widget.index, auth.token!);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(guardado ? 'Vídeo guardado!' : 'Removido dos guardados'),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+    } catch (_) {}
+  }
+
+  void _partilhar() {
+    final video = widget.video;
+    final link = ApiConfig.streamUrl(video.id);
+    Share.share(
+      'Vê esta ocorrência na plataforma OcorrênciasApp!\n\n'
+      '${video.titulo}\n${video.descricao}\n\n$link',
+      subject: video.titulo,
+    );
   }
 
   void _openReport() {
@@ -272,6 +305,20 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
                   label: _formatCount(video.visualizacoes),
                   color: Colors.white,
                   onTap: () {},
+                ),
+                const SizedBox(height: 20),
+                _ActionButton(
+                  icon: video.isGuardado ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                  label: 'Guardar',
+                  color: video.isGuardado ? Colors.blueAccent : Colors.white,
+                  onTap: _toggleGuardar,
+                ),
+                const SizedBox(height: 20),
+                _ActionButton(
+                  icon: Icons.share_rounded,
+                  label: 'Partilhar',
+                  color: Colors.white,
+                  onTap: _partilhar,
                 ),
                 const SizedBox(height: 20),
                 _ActionButton(

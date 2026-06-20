@@ -32,9 +32,13 @@ dependencies:
   # Utilitários
   intl: ^0.19.0
   path: ^1.9.0
+  http_parser: ^4.0.2
 
   # Permissões
   permission_handler: ^11.3.1
+
+  # Partilha de conteúdo
+  share_plus: ^10.0.0
 
 dev_dependencies:
   flutter_test:

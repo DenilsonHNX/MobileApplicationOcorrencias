@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../../providers/auth_provider.dart';
+import 'saved_videos_screen.dart';
+import 'my_videos_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -100,7 +102,36 @@ class ProfileScreen extends StatelessWidget {
               label: 'Tipo de conta',
               value: user.isAdmin ? 'Administrador' : 'Utilizador',
             ),
-            const SizedBox(height: 40),
+            const SizedBox(height: 24),
+
+            // Acções rápidas
+            Row(
+              children: [
+                Expanded(
+                  child: _QuickAction(
+                    icon: Icons.video_library_rounded,
+                    label: 'Meus Vídeos',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const MyVideosScreen()),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _QuickAction(
+                    icon: Icons.bookmark_rounded,
+                    label: 'Guardados',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SavedVideosScreen()),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 24),
 
             // Políticas
             Container(
@@ -223,6 +254,36 @@ class _StatusBadge extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+class _QuickAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _QuickAction({required this.icon, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: Colors.blueAccent.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: Colors.blueAccent, size: 28),
+            const SizedBox(height: 6),
+            Text(label, style: const TextStyle(color: Colors.white, fontSize: 13)),
+          ],
+        ),
+      ),
     );
   }
 }

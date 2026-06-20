@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/video_provider.dart';
 import '../../models/video_model.dart';
+import '../video/video_detail_screen.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -130,7 +131,10 @@ class _VideoThumb extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () {},
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => VideoDetailScreen(video: video)),
+      ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: Stack(

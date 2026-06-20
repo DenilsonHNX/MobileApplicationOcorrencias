@@ -1,9 +1,17 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
+    <!-- API HTTPS + mTLS (emulador) -->
     <domain-config cleartextTrafficPermitted="false">
         <domain includeSubdomains="true">10.0.2.2</domain>
         <trust-anchors>
-            <!-- Confia na CA-ISPTEC para ligações mTLS ao backend -->
+            <certificates src="@raw/ca_isptec"/>
+        </trust-anchors>
+    </domain-config>
+
+    <!-- API HTTPS + mTLS e streaming HTTP (telemóvel físico via Wi-Fi) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">192.168.1.192</domain>
+        <trust-anchors>
             <certificates src="@raw/ca_isptec"/>
         </trust-anchors>
     </domain-config>

@@ -1,12 +1,11 @@
 class ApiConfig {
-  // Backend usa HTTPS + mTLS na porta 3000
-  // Emulador Android → 10.0.2.2 aponta para o localhost do PC
-  static const String baseUrl = 'https://10.0.2.2:3000';
+  static const String baseUrl     = 'https://192.168.1.192:3000';
+  static const String mediaBaseUrl = 'http://192.168.1.192:3001';
+  static const String apiUrl      = '$baseUrl/api';
 
-  static const String apiUrl = '$baseUrl/api';
-
-  static String streamUrl(String videoId) => '$apiUrl/stream/$videoId';
-  static String hlsUrl(String hlsPath) => '$baseUrl/$hlsPath';
-  static String thumbnailUrl(String thumbPath) => '$baseUrl/$thumbPath';
-  static String uploadsUrl(String path) => '$baseUrl/$path';
+  // Stream e HLS via HTTP (porta 3001) — player nativo não suporta mTLS
+  static String streamUrl(String videoId) => '$mediaBaseUrl/api/stream/$videoId';
+  static String hlsUrl(String hlsPath)    => '$mediaBaseUrl/$hlsPath';
+  static String thumbnailUrl(String path) => '$mediaBaseUrl/$path';
+  static String uploadsUrl(String path)   => '$mediaBaseUrl/$path';
 }

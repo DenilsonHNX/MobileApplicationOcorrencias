@@ -30,6 +30,7 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
   bool _initialized = false;
   bool _showControls = false;
   bool _paused = false;
+  String? _erro;
 
   @override
   void initState() {
@@ -44,9 +45,9 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
       await _controller!.initialize();
       _controller!.setLooping(true);
       if (widget.isActive) _controller!.play();
-      if (mounted) setState(() => _initialized = true);
-    } catch (_) {
-      if (mounted) setState(() => _initialized = false);
+      if (mounted) setState(() { _initialized = true; _erro = null; });
+    } catch (e) {
+      if (mounted) setState(() { _initialized = false; _erro = e.toString(); });
     }
   }
 
@@ -217,9 +218,20 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
               ),
             ),
 
-          // Carregando
+          // Carregando / erro
           if (!_initialized)
-            const Center(child: CircularProgressIndicator(color: Colors.white)),
+            Center(
+              child: _erro != null
+                  ? Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        _erro!,
+                        style: const TextStyle(color: Colors.redAccent, fontSize: 11),
+                        textAlign: TextAlign.center,
+                      ),
+                    )
+                  : const CircularProgressIndicator(color: Colors.white),
+            ),
 
           // Informações do vídeo (inferior esquerdo)
           Positioned(

@@ -56,6 +56,13 @@ class _FeedScreenState extends State<FeedScreen> {
               const Icon(Icons.videocam_off_outlined, color: Colors.white38, size: 64),
               const SizedBox(height: 16),
               const Text('Sem vídeos de momento.', style: TextStyle(color: Colors.white54, fontSize: 16)),
+              if (vp.erroFeed != null) ...[
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Text(vp.erroFeed!, style: const TextStyle(color: Colors.redAccent, fontSize: 11), textAlign: TextAlign.center),
+                ),
+              ],
               const SizedBox(height: 16),
               ElevatedButton(
                 onPressed: _loadFeed,

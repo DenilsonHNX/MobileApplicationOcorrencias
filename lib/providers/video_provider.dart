@@ -3,6 +3,7 @@ import '../models/video_model.dart';
 import '../models/category_model.dart';
 import '../services/video_service.dart';
 import '../services/category_service.dart';
+import '../services/mtls_client.dart';
 
 class VideoProvider extends ChangeNotifier {
   List<VideoModel> _videos = [];
@@ -14,6 +15,7 @@ class VideoProvider extends ChangeNotifier {
   int _pagina = 1;
   String? _categoriaFiltro;
   String? _pesquisa;
+  String? _erroFeed;
 
   List<VideoModel> get videos => _videos;
   List<CategoryModel> get categorias => _categorias;
@@ -22,6 +24,7 @@ class VideoProvider extends ChangeNotifier {
   bool get loading => _loading;
   bool get hasMore => _hasMore;
   String? get categoriaFiltro => _categoriaFiltro;
+  String? get erroFeed => _erroFeed;
 
   Future<void> loadCategorias() async {
     if (_categorias.isNotEmpty) return;
@@ -35,6 +38,7 @@ class VideoProvider extends ChangeNotifier {
       _pagina = 1;
       _hasMore = true;
       _videos = [];
+      _erroFeed = null;
     }
     if (!_hasMore) return;
     _loading = true;
@@ -54,8 +58,11 @@ class VideoProvider extends ChangeNotifier {
         _videos.addAll(novos);
         _pagina++;
       }
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('FEED ERROR: $e\n$st');
       _hasMore = false;
+      _erroFeed = e.toString();
+      MtlsClient.reset(); // força nova conexão no próximo retry
     }
 
     _loading = false;

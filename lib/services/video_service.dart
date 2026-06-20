@@ -16,20 +16,25 @@ class VideoService {
     String? pesquisa,
     String? token,
   }) async {
-    final params = {
+    final Map<String, String> params = {
       'pagina': '$pagina',
       'limite': '$limite',
-      'categoriaId': ?categoriaId,
-      if (pesquisa != null && pesquisa.isNotEmpty) 'q': pesquisa,
     };
+    if (categoriaId != null) params['categoriaId'] = categoriaId;
+    if (pesquisa != null && pesquisa.isNotEmpty) params['q'] = pesquisa;
+
     final uri = Uri.parse('${ApiConfig.apiUrl}/videos').replace(queryParameters: params);
     final headers = token != null ? {'Authorization': 'Bearer $token'} : <String, String>{};
     final client = await MtlsClient.get();
-    final response = await client.get(uri, headers: headers);
-    if (response.statusCode != 200) throw Exception('Erro ao carregar vídeos');
+    final response = await client
+        .get(uri, headers: headers)
+        .timeout(const Duration(seconds: 12), onTimeout: () => throw Exception('Timeout ao carregar feed'));
+    if (response.statusCode != 200) {
+      throw Exception('HTTP ${response.statusCode}: ${response.body}');
+    }
     final data = jsonDecode(response.body) as Map<String, dynamic>;
-    final lista = data['videos'] ?? [];
-    return (lista as List).map((v) => VideoModel.fromJson(v as Map<String, dynamic>)).toList();
+    final lista = (data['videos'] as List?) ?? [];
+    return lista.map((v) => VideoModel.fromJson(v as Map<String, dynamic>)).toList();
   }
 
   static Future<VideoModel> getVideo(String id, {String? token}) async {

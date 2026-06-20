@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 import '../../models/category_model.dart';
@@ -34,7 +35,25 @@ class _UploadScreenState extends State<UploadScreen> {
     super.dispose();
   }
 
+  Future<bool> _checkPermission(ImageSource source) async {
+    final Permission perm =
+        source == ImageSource.camera ? Permission.camera : Permission.videos;
+    final status = await perm.request();
+    if (status.isGranted) return true;
+    if (status.isPermanentlyDenied) {
+      _showSnack('Permissão negada permanentemente. Active nas definições.');
+      await openAppSettings();
+    } else {
+      _showSnack(source == ImageSource.camera
+          ? 'Permissão de câmara necessária.'
+          : 'Permissão de armazenamento necessária.');
+    }
+    return false;
+  }
+
   Future<void> _pickVideo(ImageSource source) async {
+    if (!await _checkPermission(source)) return;
+
     final picked = await _picker.pickVideo(
       source: source,
       maxDuration: const Duration(minutes: 15),

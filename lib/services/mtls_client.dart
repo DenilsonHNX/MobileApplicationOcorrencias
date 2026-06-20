@@ -13,6 +13,11 @@ class MtlsClient {
     return _client!;
   }
 
+  static void reset() {
+    _client?.close();
+    _client = null;
+  }
+
   static Future<http.Client> _build() async {
     final caCertBytes  = (await rootBundle.load('assets/certs/ca.crt')).buffer.asUint8List();
     final clientCert   = (await rootBundle.load('assets/certs/app.crt')).buffer.asUint8List();
@@ -24,8 +29,7 @@ class MtlsClient {
       ..usePrivateKeyBytes(clientKey);              // chave privada do app (não encriptada)
 
     final httpClient = HttpClient(context: context)
-      // O CN do servidor é 'academico.isptec.local', não o IP do emulador.
-      // Em dev aceitamos o mismatch mas verificamos a assinatura da CA.
+      ..connectionTimeout = const Duration(seconds: 10)
       ..badCertificateCallback = (cert, host, port) {
         return cert.issuer.contains('CA-ISPTEC');
       };

@@ -36,6 +36,14 @@ class VideoGrid extends StatelessWidget {
                 )
               else
                 _placeholder(),
+              // Ícone de play central
+              const Center(
+                child: Icon(
+                  Icons.play_circle_filled_rounded,
+                  color: Colors.white54,
+                  size: 36,
+                ),
+              ),
               // Gradient + duração
               Positioned(
                 bottom: 0,

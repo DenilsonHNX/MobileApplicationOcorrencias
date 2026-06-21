@@ -164,6 +164,14 @@ class _VideoThumb extends StatelessWidget {
                 ),
               ),
             ),
+            // Ícone de play
+            const Center(
+              child: Icon(
+                Icons.play_circle_filled_rounded,
+                color: Colors.white54,
+                size: 42,
+              ),
+            ),
             // Info
             Positioned(
               bottom: 8,

@@ -11,6 +11,7 @@
     <!-- API HTTPS + mTLS e streaming HTTP (telemóvel físico via Wi-Fi) -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">192.168.1.192</domain>
+        <domain includeSubdomains="true">172.16.20.9</domain>
         <trust-anchors>
             <certificates src="@raw/ca_isptec"/>
         </trust-anchors>

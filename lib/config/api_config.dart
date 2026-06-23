@@ -1,6 +1,6 @@
 class ApiConfig {
-  static const String baseUrl     = 'https://192.168.1.192:3000';
-  static const String mediaBaseUrl = 'http://192.168.1.192:3001';
+  static const String baseUrl     = 'https://172.16.20.9:3000';
+  static const String mediaBaseUrl = 'http://172.16.20.9:3001';
   static const String apiUrl      = '$baseUrl/api';
 
   // Stream e HLS via HTTP (porta 3001) — player nativo não suporta mTLS

@@ -5,6 +5,7 @@ import '../feed/feed_screen.dart';
 import '../search/search_screen.dart';
 import '../upload/upload_screen.dart';
 import '../profile/profile_screen.dart';
+import '../live/live_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,6 +20,7 @@ class _HomeScreenState extends State<HomeScreen> {
   static const _screens = [
     FeedScreen(),
     SearchScreen(),
+    LiveScreen(),
     ProfileScreen(),
   ];
 
@@ -88,8 +90,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-              _NavItem(icon: Icons.person_rounded, label: 'Perfil', selected: _tab == 2,
-                  onTap: () => setState(() => _tab = 2)),
+              _NavItem(icon: Icons.sensors_rounded, label: 'Live', selected: _tab == 2,
+                  onTap: () => setState(() => _tab = 2),
+                  liveIndicator: true),
+              _NavItem(icon: Icons.person_rounded, label: 'Perfil', selected: _tab == 3,
+                  onTap: () => setState(() => _tab = 3)),
             ],
           ),
         ),
@@ -103,12 +108,14 @@ class _NavItem extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final bool liveIndicator;
 
   const _NavItem({
     required this.icon,
     required this.label,
     required this.selected,
     required this.onTap,
+    this.liveIndicator = false,
   });
 
   @override
@@ -120,7 +127,23 @@ class _NavItem extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: selected ? Colors.blueAccent : Colors.white38, size: 26),
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(icon, color: selected ? Colors.blueAccent : Colors.white38, size: 26),
+                if (liveIndicator)
+                  Positioned(
+                    top: -2, right: -4,
+                    child: Container(
+                      width: 8, height: 8,
+                      decoration: const BoxDecoration(
+                        color: Colors.redAccent,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
             const SizedBox(height: 2),
             Text(
               label,

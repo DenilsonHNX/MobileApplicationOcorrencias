@@ -20,6 +20,9 @@ dependencies:
   # Seleção de mídia (câmara + galeria)
   image_picker: ^1.1.2
 
+  # Câmara contínua (live streaming)
+  camera: ^0.11.0
+
   # Gestão de estado
   provider: ^6.1.2
 

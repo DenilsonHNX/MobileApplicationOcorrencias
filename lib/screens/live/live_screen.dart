@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -12,7 +13,25 @@ import 'package:video_player/video_player.dart';
 import '../../config/api_config.dart';
 import '../../providers/auth_provider.dart';
 
-// ─────────────────────────── VIEWER (ecrã inicial) ───────────────────────────
+// ─────────────────────── helpers ─────────────────────────────────────────────
+
+/// Converte o nome do utilizador num channelId seguro (≤15 chars, ASCII)
+String _toChannelId(String nome) {
+  final safe = nome
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9_]'), '_');
+  return safe.substring(0, min(15, safe.length));
+}
+
+String _fmtHora(String? iso) {
+  if (iso == null) return '';
+  try {
+    final dt = DateTime.parse(iso).toLocal();
+    return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  } catch (_) { return ''; }
+}
+
+// ─────────────────── LiveScreen (lista de transmissões) ──────────────────────
 
 class LiveScreen extends StatefulWidget {
   const LiveScreen({super.key});
@@ -22,17 +41,15 @@ class LiveScreen extends StatefulWidget {
 }
 
 class _LiveScreenState extends State<LiveScreen> {
-  bool _aoVivo      = false;
-  String? _titulo;
-  String? _iniciadoEm;
-  bool _verificando = true;
+  List<Map<String, dynamic>> _streams   = [];
+  bool   _carregando = true;
   Timer? _pollTimer;
 
   @override
   void initState() {
     super.initState();
-    _verificarStatus();
-    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _verificarStatus());
+    _carregar();
+    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _carregar());
   }
 
   @override
@@ -41,105 +58,122 @@ class _LiveScreenState extends State<LiveScreen> {
     super.dispose();
   }
 
-  Future<void> _verificarStatus() async {
+  Future<void> _carregar() async {
     try {
       final res = await http
-          .get(Uri.parse('${ApiConfig.mediaBaseUrl}/api/live/status'))
+          .get(Uri.parse('${ApiConfig.mediaBaseUrl}/api/live/streams'))
           .timeout(const Duration(seconds: 5));
       if (!mounted) return;
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       setState(() {
-        _aoVivo      = data['ao_vivo'] == true;
-        _titulo      = data['titulo'] as String?;
-        _iniciadoEm  = data['iniciadoEm'] as String?;
-        _verificando = false;
+        _streams   = List<Map<String, dynamic>>.from(data['streams'] as List? ?? []);
+        _carregando = false;
       });
     } catch (_) {
-      if (mounted) setState(() => _verificando = false);
+      if (mounted) setState(() => _carregando = false);
     }
   }
 
-  String _fmtHora(String? iso) {
-    if (iso == null) return '';
-    try {
-      final dt = DateTime.parse(iso).toLocal();
-      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-    } catch (_) { return ''; }
+  void _assistir(Map<String, dynamic> stream) {
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => TcpViewerScreen(
+        channelId: stream['channelId'] as String,
+        nome:      stream['channelId'] as String,
+      ),
+    ));
+  }
+
+  void _irAoVivo(AuthProvider auth) {
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => BroadcastScreen(channelId: _toChannelId(auth.user!.nome)),
+    )).then((_) => _carregar());
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A1A),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0D0D1F),
         elevation: 0,
         title: Row(children: [
-          if (_aoVivo) ...[
+          if (_streams.isNotEmpty) ...[
             Container(width: 10, height: 10,
               decoration: const BoxDecoration(color: Colors.redAccent, shape: BoxShape.circle)),
             const SizedBox(width: 8),
-            const Text('AO VIVO', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 14)),
+            Text('${_streams.length} AO VIVO',
+              style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 14)),
           ] else
-            const Text('Transmissão', style: TextStyle(color: Colors.white70, fontSize: 16)),
+            const Text('Transmissões', style: TextStyle(color: Colors.white70, fontSize: 16)),
         ]),
         actions: [
           if (auth.isAuthenticated)
             TextButton.icon(
               icon: const Icon(Icons.videocam_rounded, color: Colors.redAccent, size: 20),
-              label: const Text('Ir ao Vivo', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-              onPressed: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const BroadcastScreen()))
-                .then((_) => _verificarStatus()),
+              label: const Text('Ir ao Vivo',
+                style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+              onPressed: () => _irAoVivo(auth),
             ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded, color: Colors.white54),
-            onPressed: () { setState(() => _verificando = true); _verificarStatus(); },
+            onPressed: () { setState(() => _carregando = true); _carregar(); },
           ),
         ],
       ),
-      body: _verificando
+      body: _carregando
           ? const Center(child: CircularProgressIndicator(color: Colors.blueAccent))
-          : _aoVivo ? _buildAoVivo() : _buildOffline(auth),
+          : _streams.isEmpty
+              ? _buildOffline(auth)
+              : _buildLista(),
     );
   }
 
-  Widget _buildAoVivo() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(color: Colors.redAccent, borderRadius: BorderRadius.circular(10)),
-            child: const Text('🔴 AO VIVO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+  Widget _buildLista() {
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _streams.length,
+      itemBuilder: (_, i) {
+        final s = _streams[i];
+        final channelId = s['channelId'] as String? ?? '';
+        final viewers   = s['viewers']   as int?    ?? 0;
+        final horaStr   = _fmtHora(s['iniciadoEm'] as String?);
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF13132A),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.redAccent.withValues(alpha: 0.4), width: 1),
           ),
-          const SizedBox(height: 20),
-          Text(_titulo ?? 'Transmissão ao Vivo',
-            style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center),
-          if (_iniciadoEm != null) ...[
-            const SizedBox(height: 8),
-            Text('Desde ${_fmtHora(_iniciadoEm)}',
-              style: const TextStyle(color: Colors.white38, fontSize: 13)),
-          ],
-          const SizedBox(height: 40),
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            leading: Container(
+              width: 48, height: 48,
+              decoration: BoxDecoration(color: Colors.redAccent, borderRadius: BorderRadius.circular(12)),
+              child: const Icon(Icons.videocam_rounded, color: Colors.white),
             ),
-            icon: const Icon(Icons.play_arrow_rounded, size: 28),
-            label: const Text('Assistir', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            onPressed: () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => const TcpViewerScreen())),
+            title: Text(
+              channelId,
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+            subtitle: Text(
+              '${viewers > 0 ? "$viewers espectador${viewers != 1 ? 'es' : ''}" : "Sem espectadores"}${horaStr.isNotEmpty ? "  •  desde $horaStr" : ""}',
+              style: const TextStyle(color: Colors.white38, fontSize: 12),
+            ),
+            trailing: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () => _assistir(s),
+              child: const Text('Assistir', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            ),
           ),
-          const SizedBox(height: 12),
-          const Text('Vídeo + áudio em tempo real via TCP',
-            style: TextStyle(color: Colors.white24, fontSize: 11)),
-        ]),
-      ),
+        );
+      },
     );
   }
 
@@ -150,31 +184,29 @@ class _LiveScreenState extends State<LiveScreen> {
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Container(
             width: 80, height: 80,
-            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), shape: BoxShape.circle),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.05), shape: BoxShape.circle),
             child: const Icon(Icons.sensors_off_rounded, color: Colors.white24, size: 40),
           ),
           const SizedBox(height: 24),
-          const Text('Sem transmissão activa',
+          const Text('Nenhuma transmissão activa',
             style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
-          const Text('Nenhuma transmissão ao vivo de momento.',
-            style: TextStyle(color: Colors.white38, fontSize: 13, height: 1.5),
-            textAlign: TextAlign.center),
+          const Text('Sê o primeiro a transmitir ao vivo.',
+            style: TextStyle(color: Colors.white38, fontSize: 13), textAlign: TextAlign.center),
           const SizedBox(height: 32),
-          if (auth.isAuthenticated) ...[
+          if (auth.isAuthenticated)
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.redAccent,
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               ),
               icon: const Icon(Icons.videocam_rounded),
-              label: const Text('Iniciar Transmissão', style: TextStyle(fontWeight: FontWeight.bold)),
-              onPressed: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const BroadcastScreen()))
-                .then((_) => _verificarStatus()),
+              label: const Text('Iniciar Transmissão',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+              onPressed: () => _irAoVivo(auth),
             ),
-            const SizedBox(height: 12),
-          ],
+          const SizedBox(height: 12),
           OutlinedButton.icon(
             style: OutlinedButton.styleFrom(
               foregroundColor: Colors.white54,
@@ -182,7 +214,7 @@ class _LiveScreenState extends State<LiveScreen> {
             ),
             icon: const Icon(Icons.refresh_rounded, size: 18),
             label: const Text('Verificar novamente'),
-            onPressed: () { setState(() => _verificando = true); _verificarStatus(); },
+            onPressed: () { setState(() => _carregando = true); _carregar(); },
           ),
         ]),
       ),
@@ -193,26 +225,25 @@ class _LiveScreenState extends State<LiveScreen> {
 // ─────────────────────────── TCP VIEWER ──────────────────────────────────────
 
 class TcpViewerScreen extends StatefulWidget {
-  const TcpViewerScreen({super.key});
+  final String channelId;
+  final String nome;
+  const TcpViewerScreen({super.key, required this.channelId, required this.nome});
 
   @override
   State<TcpViewerScreen> createState() => _TcpViewerScreenState();
 }
 
 class _TcpViewerScreenState extends State<TcpViewerScreen> {
-  Socket?                 _socket;
-  String?                 _erro;
-  bool                    _conectando = true;
+  Socket?  _socket;
+  String?  _erro;
+  bool     _conectando     = true;
+  int      _chunksRecebidos = 0;
 
-  // Buffer do protocolo TCP
-  final List<int> _buf = [];
-
-  // Fila de clips de vídeo prontos para tocar
-  final Queue<File>       _queue   = Queue();
-  VideoPlayerController?  _ctrl;
-  bool                    _playing = false;
-  int                     _chunkIdx = 0;
-  int                     _chunksRecebidos = 0;
+  final List<int>  _buf   = [];
+  final Queue<File> _queue = Queue();
+  VideoPlayerController? _ctrl;
+  bool _playing  = false;
+  int  _chunkIdx = 0;
 
   @override
   void initState() {
@@ -224,7 +255,6 @@ class _TcpViewerScreenState extends State<TcpViewerScreen> {
   void dispose() {
     _socket?.destroy();
     _ctrl?.dispose();
-    // Limpar ficheiros temporários
     for (final f in _queue) { try { f.deleteSync(); } catch (_) {} }
     super.dispose();
   }
@@ -237,8 +267,11 @@ class _TcpViewerScreenState extends State<TcpViewerScreen> {
         timeout: const Duration(seconds: 8),
       );
       _socket = socket;
-      // Enviar role VIEWER (16 bytes com padding)
-      socket.add(Uint8List.fromList(utf8.encode('VIEWER'.padRight(16))));
+
+      // Role: 'V' + channelId (16 bytes total)
+      final roleStr = 'V${widget.channelId}'.padRight(16).substring(0, 16);
+      socket.add(Uint8List.fromList(utf8.encode(roleStr)));
+
       if (mounted) setState(() => _conectando = false);
 
       socket.listen(
@@ -263,14 +296,15 @@ class _TcpViewerScreenState extends State<TcpViewerScreen> {
   }
 
   Future<void> _onChunkReceived(Uint8List bytes) async {
-    _chunksRecebidos++;
-    // Descartar chunks antigos se a fila crescer (evitar latência acumulada)
+    if (mounted) setState(() => _chunksRecebidos++);
+    // Descartar chunks antigos para evitar lag acumulado
     if (_queue.length >= 2) {
       final old = _queue.removeFirst();
       try { old.deleteSync(); } catch (_) {}
     }
     final dir  = await getTemporaryDirectory();
-    final file = File('${dir.path}/live_chunk_${_chunkIdx++}.mp4');
+    final file = File('${dir.path}/live_${widget.channelId}_$_chunkIdx.mp4');
+    _chunkIdx++;
     await file.writeAsBytes(bytes);
     _queue.add(file);
     if (!_playing) _playNext();
@@ -296,14 +330,11 @@ class _TcpViewerScreenState extends State<TcpViewerScreen> {
     setState(() => _ctrl = ctrl);
     await ctrl.play();
 
-    // Aguardar fim do clip
     final completer = Completer<void>();
     void listener() {
       if (!ctrl.value.isPlaying &&
           ctrl.value.position >= ctrl.value.duration &&
-          !completer.isCompleted) {
-        completer.complete();
-      }
+          !completer.isCompleted) { completer.complete(); }
     }
     ctrl.addListener(listener);
     await completer.future.timeout(const Duration(seconds: 5), onTimeout: () {});
@@ -325,11 +356,16 @@ class _TcpViewerScreenState extends State<TcpViewerScreen> {
         title: Row(children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(color: Colors.redAccent, borderRadius: BorderRadius.circular(6)),
-            child: const Text('🔴 AO VIVO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
+            decoration: BoxDecoration(
+              color: Colors.redAccent, borderRadius: BorderRadius.circular(6)),
+            child: const Text('🔴 AO VIVO',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
           ),
           const SizedBox(width: 10),
-          Text('$_chunksRecebidos clips', style: const TextStyle(color: Colors.white38, fontSize: 12)),
+          Text(widget.nome, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          const SizedBox(width: 10),
+          Text('$_chunksRecebidos clips',
+            style: const TextStyle(color: Colors.white38, fontSize: 11)),
         ]),
         actions: [
           IconButton(
@@ -342,7 +378,7 @@ class _TcpViewerScreenState extends State<TcpViewerScreen> {
           ? const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
               CircularProgressIndicator(color: Colors.redAccent),
               SizedBox(height: 16),
-              Text('A ligar ao stream...', style: TextStyle(color: Colors.white54)),
+              Text('A ligar ao canal...', style: TextStyle(color: Colors.white54)),
             ]))
           : _erro != null
               ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -359,14 +395,21 @@ class _TcpViewerScreenState extends State<TcpViewerScreen> {
                   ),
                 ]))
               : _ctrl != null && _ctrl!.value.isInitialized
-                  ? AspectRatio(
-                      aspectRatio: _ctrl!.value.aspectRatio,
-                      child: VideoPlayer(_ctrl!),
+                  ? SizedBox.expand(
+                      child: FittedBox(
+                        fit: BoxFit.contain,
+                        child: SizedBox(
+                          width:  _ctrl!.value.size.width,
+                          height: _ctrl!.value.size.height,
+                          child: VideoPlayer(_ctrl!),
+                        ),
+                      ),
                     )
                   : const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                       CircularProgressIndicator(color: Colors.white24),
                       SizedBox(height: 12),
-                      Text('À espera do primeiro clip com áudio...', style: TextStyle(color: Colors.white38)),
+                      Text('À espera do primeiro clip com áudio...',
+                        style: TextStyle(color: Colors.white38)),
                     ])),
     );
   }
@@ -375,7 +418,8 @@ class _TcpViewerScreenState extends State<TcpViewerScreen> {
 // ─────────────────────────── TCP BROADCASTER ─────────────────────────────────
 
 class BroadcastScreen extends StatefulWidget {
-  const BroadcastScreen({super.key});
+  final String channelId;
+  const BroadcastScreen({super.key, required this.channelId});
 
   @override
   State<BroadcastScreen> createState() => _BroadcastScreenState();
@@ -383,14 +427,14 @@ class BroadcastScreen extends StatefulWidget {
 
 class _BroadcastScreenState extends State<BroadcastScreen> {
   CameraController?       _camCtrl;
-  List<CameraDescription> _cameras = [];
+  List<CameraDescription> _cameras   = [];
   bool   _iniciando      = true;
   bool   _transmitindo   = false;
   bool   _gravando       = false;
   bool   _trocandoCamera = false;
   String? _erro;
   int    _clipsSent = 0;
-  int    _fps       = 0;
+  int    _kbUltimo  = 0;
 
   Socket? _socket;
 
@@ -412,9 +456,11 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
       _cameras = await availableCameras();
       if (_cameras.isEmpty) throw Exception('Nenhuma câmara encontrada.');
       final idx = _cameras.indexWhere((c) => c.lensDirection == CameraLensDirection.back);
-      final cam = _cameras[idx >= 0 ? idx : 0];
-      // enableAudio: true — o microfone é capturado junto com o vídeo
-      final ctrl = CameraController(cam, ResolutionPreset.medium, enableAudio: true);
+      final ctrl = CameraController(
+        _cameras[idx >= 0 ? idx : 0],
+        ResolutionPreset.medium,
+        enableAudio: true,
+      );
       await ctrl.initialize();
       if (!mounted) return;
       setState(() { _camCtrl = ctrl; _iniciando = false; });
@@ -432,7 +478,10 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
         timeout: const Duration(seconds: 8),
       );
       _socket = socket;
-      socket.add(Uint8List.fromList(utf8.encode('STREAMER'.padRight(16))));
+
+      // Role: 'S' + channelId (16 bytes)
+      final roleStr = 'S${widget.channelId}'.padRight(16).substring(0, 16);
+      socket.add(Uint8List.fromList(utf8.encode(roleStr)));
       socket.listen((_) {}, onError: (_) => _pararTransmissao(), onDone: () => _pararTransmissao());
 
       setState(() { _transmitindo = true; _clipsSent = 0; });
@@ -442,7 +491,6 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
     }
   }
 
-  // Grava clips de 2s (vídeo + áudio) em loop e envia via TCP
   Future<void> _recordLoop() async {
     while (_transmitindo && _camCtrl != null) {
       try {
@@ -451,7 +499,6 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
         await Future.delayed(const Duration(seconds: 2));
 
         if (!_transmitindo) {
-          // Parou durante a gravação — descartar
           try { await _camCtrl!.stopVideoRecording(); } catch (_) {}
           break;
         }
@@ -462,7 +509,6 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
         final bytes = await File(xFile.path).readAsBytes();
         try { File(xFile.path).deleteSync(); } catch (_) {}
 
-        // Protocolo: 4 bytes big-endian tamanho + payload MP4
         final sz = bytes.length;
         final header = Uint8List(4)
           ..[0] = (sz >> 24) & 0xff
@@ -472,7 +518,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
         _socket?.add(header);
         _socket?.add(bytes);
 
-        if (mounted) setState(() { _clipsSent++; _fps = sz ~/ 1024; });
+        if (mounted) setState(() { _clipsSent++; _kbUltimo = sz ~/ 1024; });
       } catch (_) {
         setState(() => _gravando = false);
         await Future.delayed(const Duration(milliseconds: 200));
@@ -517,9 +563,8 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
     if (!mounted) { ctrl.dispose(); return; }
 
     setState(() { _camCtrl = ctrl; _trocandoCamera = false; });
-
     if (wasTransmitting) {
-      setState(() { _transmitindo = true; });
+      setState(() => _transmitindo = true);
       _recordLoop();
     }
   }
@@ -565,6 +610,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
             begin: Alignment.bottomCenter, end: Alignment.topCenter,
             colors: [Colors.black87, Colors.transparent])))),
 
+      // Header
       Positioned(top: 0, left: 0, right: 0,
         child: SafeArea(
           child: Padding(
@@ -579,21 +625,22 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
               if (_transmitindo) ...[
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(color: Colors.redAccent, borderRadius: BorderRadius.circular(8)),
-                  child: const Text('🔴 AO VIVO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent, borderRadius: BorderRadius.circular(8)),
+                  child: const Text('🔴 AO VIVO',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
                 ),
-                const SizedBox(width: 10),
-                Text('$_clipsSent clips  •  $_fps KB/clip',
-                  style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                const SizedBox(width: 8),
+                Text('$_clipsSent clips  •  ${_kbUltimo}KB',
+                  style: const TextStyle(color: Colors.white70, fontSize: 11)),
+              ] else ...[
+                Text('Canal: ${widget.channelId}',
+                  style: const TextStyle(color: Colors.white54, fontSize: 13)),
               ],
               const Spacer(),
-              // Indicador de gravação activa
               if (_gravando)
-                Container(
-                  width: 10, height: 10,
-                  margin: const EdgeInsets.only(right: 12),
-                  decoration: const BoxDecoration(color: Colors.redAccent, shape: BoxShape.circle),
-                ),
+                Container(width: 10, height: 10, margin: const EdgeInsets.only(right: 12),
+                  decoration: const BoxDecoration(color: Colors.redAccent, shape: BoxShape.circle)),
               if (_cameras.length > 1)
                 GestureDetector(
                   onTap: _trocandoCamera ? null : _trocarCamera,
@@ -606,7 +653,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
           ),
         )),
 
-      // Ícone de microfone activo
+      // Microfone activo
       if (_transmitindo)
         Positioned(bottom: 140, right: 24,
           child: Container(
@@ -639,7 +686,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
       if (!_transmitindo)
         const Positioned(bottom: 24, left: 0, right: 0,
           child: Center(
-            child: Text('Vídeo + áudio via TCP socket',
+            child: Text('Toca para transmitir vídeo + áudio via TCP',
               style: TextStyle(color: Colors.white38, fontSize: 12)))),
     ]);
   }

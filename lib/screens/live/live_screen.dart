@@ -1,15 +1,18 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
+import 'package:video_player/video_player.dart';
 import '../../config/api_config.dart';
 import '../../providers/auth_provider.dart';
 
-// ─────────────────────────── VIEWER ──────────────────────────────────────────
+// ─────────────────────────── VIEWER (ecrã inicial) ───────────────────────────
 
 class LiveScreen extends StatefulWidget {
   const LiveScreen({super.key});
@@ -23,7 +26,6 @@ class _LiveScreenState extends State<LiveScreen> {
   String? _titulo;
   String? _iniciadoEm;
   bool _verificando = true;
-
   Timer? _pollTimer;
 
   @override
@@ -41,8 +43,9 @@ class _LiveScreenState extends State<LiveScreen> {
 
   Future<void> _verificarStatus() async {
     try {
-      final uri = Uri.parse('${ApiConfig.mediaBaseUrl}/api/live/status');
-      final res = await http.get(uri).timeout(const Duration(seconds: 5));
+      final res = await http
+          .get(Uri.parse('${ApiConfig.mediaBaseUrl}/api/live/status'))
+          .timeout(const Duration(seconds: 5));
       if (!mounted) return;
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       setState(() {
@@ -64,19 +67,9 @@ class _LiveScreenState extends State<LiveScreen> {
     } catch (_) { return ''; }
   }
 
-  void _abrirBroadcaster() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const BroadcastScreen()))
-        .then((_) => _verificarStatus());
-  }
-
-  void _abrirViewer() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const TcpViewerScreen()));
-  }
-
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A1A),
       appBar: AppBar(
@@ -96,7 +89,9 @@ class _LiveScreenState extends State<LiveScreen> {
             TextButton.icon(
               icon: const Icon(Icons.videocam_rounded, color: Colors.redAccent, size: 20),
               label: const Text('Ir ao Vivo', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-              onPressed: _abrirBroadcaster,
+              onPressed: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const BroadcastScreen()))
+                .then((_) => _verificarStatus()),
             ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded, color: Colors.white54),
@@ -121,11 +116,9 @@ class _LiveScreenState extends State<LiveScreen> {
             child: const Text('🔴 AO VIVO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
           ),
           const SizedBox(height: 20),
-          Text(
-            _titulo ?? 'Transmissão ao Vivo',
+          Text(_titulo ?? 'Transmissão ao Vivo',
             style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
-          ),
+            textAlign: TextAlign.center),
           if (_iniciadoEm != null) ...[
             const SizedBox(height: 8),
             Text('Desde ${_fmtHora(_iniciadoEm)}',
@@ -139,10 +132,12 @@ class _LiveScreenState extends State<LiveScreen> {
             ),
             icon: const Icon(Icons.play_arrow_rounded, size: 28),
             label: const Text('Assistir', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            onPressed: _abrirViewer,
+            onPressed: () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => const TcpViewerScreen())),
           ),
           const SizedBox(height: 12),
-          const Text('Stream em tempo real via TCP', style: TextStyle(color: Colors.white24, fontSize: 11)),
+          const Text('Vídeo + áudio em tempo real via TCP',
+            style: TextStyle(color: Colors.white24, fontSize: 11)),
         ]),
       ),
     );
@@ -174,7 +169,9 @@ class _LiveScreenState extends State<LiveScreen> {
               ),
               icon: const Icon(Icons.videocam_rounded),
               label: const Text('Iniciar Transmissão', style: TextStyle(fontWeight: FontWeight.bold)),
-              onPressed: _abrirBroadcaster,
+              onPressed: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const BroadcastScreen()))
+                .then((_) => _verificarStatus()),
             ),
             const SizedBox(height: 12),
           ],
@@ -203,30 +200,32 @@ class TcpViewerScreen extends StatefulWidget {
 }
 
 class _TcpViewerScreenState extends State<TcpViewerScreen> {
-  Socket?    _socket;
-  Uint8List? _frame;
-  String?    _erro;
-  bool       _conectando = true;
-  int        _fps        = 0;
-  int        _frameCount = 0;
-  Timer?     _fpsTimer;
+  Socket?                 _socket;
+  String?                 _erro;
+  bool                    _conectando = true;
 
-  // Buffer para montar frames do protocolo TCP
+  // Buffer do protocolo TCP
   final List<int> _buf = [];
+
+  // Fila de clips de vídeo prontos para tocar
+  final Queue<File>       _queue   = Queue();
+  VideoPlayerController?  _ctrl;
+  bool                    _playing = false;
+  int                     _chunkIdx = 0;
+  int                     _chunksRecebidos = 0;
 
   @override
   void initState() {
     super.initState();
     _connect();
-    _fpsTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() { _fps = _frameCount; _frameCount = 0; });
-    });
   }
 
   @override
   void dispose() {
-    _fpsTimer?.cancel();
     _socket?.destroy();
+    _ctrl?.dispose();
+    // Limpar ficheiros temporários
+    for (final f in _queue) { try { f.deleteSync(); } catch (_) {} }
     super.dispose();
   }
 
@@ -238,18 +237,12 @@ class _TcpViewerScreenState extends State<TcpViewerScreen> {
         timeout: const Duration(seconds: 8),
       );
       _socket = socket;
-
       // Enviar role VIEWER (16 bytes com padding)
-      final role = 'VIEWER'.padRight(16);
-      socket.add(Uint8List.fromList(utf8.encode(role)));
-
+      socket.add(Uint8List.fromList(utf8.encode('VIEWER'.padRight(16))));
       if (mounted) setState(() => _conectando = false);
 
       socket.listen(
-        (data) {
-          _buf.addAll(data);
-          _processBuffer();
-        },
+        (data) { _buf.addAll(data); _processBuffer(); },
         onError: (_) { if (mounted) setState(() => _erro = 'Conexão perdida.'); },
         onDone:  ()  { if (mounted) setState(() => _erro = 'Transmissão encerrada.'); },
         cancelOnError: true,
@@ -263,11 +256,63 @@ class _TcpViewerScreenState extends State<TcpViewerScreen> {
     while (_buf.length >= 4) {
       final size = (_buf[0] << 24) | (_buf[1] << 16) | (_buf[2] << 8) | _buf[3];
       if (_buf.length < 4 + size) break;
-      final jpeg = Uint8List.fromList(_buf.sublist(4, 4 + size));
+      final chunk = Uint8List.fromList(_buf.sublist(4, 4 + size));
       _buf.removeRange(0, 4 + size);
-      _frameCount++;
-      if (mounted) setState(() => _frame = jpeg);
+      _onChunkReceived(chunk);
     }
+  }
+
+  Future<void> _onChunkReceived(Uint8List bytes) async {
+    _chunksRecebidos++;
+    // Descartar chunks antigos se a fila crescer (evitar latência acumulada)
+    if (_queue.length >= 2) {
+      final old = _queue.removeFirst();
+      try { old.deleteSync(); } catch (_) {}
+    }
+    final dir  = await getTemporaryDirectory();
+    final file = File('${dir.path}/live_chunk_${_chunkIdx++}.mp4');
+    await file.writeAsBytes(bytes);
+    _queue.add(file);
+    if (!_playing) _playNext();
+  }
+
+  Future<void> _playNext() async {
+    if (_queue.isEmpty) { _playing = false; return; }
+    _playing = true;
+
+    final file = _queue.removeFirst();
+    final ctrl = VideoPlayerController.file(file);
+
+    try {
+      await ctrl.initialize();
+    } catch (_) {
+      ctrl.dispose();
+      try { file.deleteSync(); } catch (_) {}
+      _playNext();
+      return;
+    }
+
+    if (!mounted) { ctrl.dispose(); return; }
+    setState(() => _ctrl = ctrl);
+    await ctrl.play();
+
+    // Aguardar fim do clip
+    final completer = Completer<void>();
+    void listener() {
+      if (!ctrl.value.isPlaying &&
+          ctrl.value.position >= ctrl.value.duration &&
+          !completer.isCompleted) {
+        completer.complete();
+      }
+    }
+    ctrl.addListener(listener);
+    await completer.future.timeout(const Duration(seconds: 5), onTimeout: () {});
+    ctrl.removeListener(listener);
+
+    ctrl.dispose();
+    try { file.deleteSync(); } catch (_) {}
+    if (mounted) setState(() => _ctrl = null);
+    _playNext();
   }
 
   @override
@@ -284,7 +329,7 @@ class _TcpViewerScreenState extends State<TcpViewerScreen> {
             child: const Text('🔴 AO VIVO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
           ),
           const SizedBox(width: 10),
-          Text('$_fps fps', style: const TextStyle(color: Colors.white38, fontSize: 12)),
+          Text('$_chunksRecebidos clips', style: const TextStyle(color: Colors.white38, fontSize: 12)),
         ]),
         actions: [
           IconButton(
@@ -305,21 +350,24 @@ class _TcpViewerScreenState extends State<TcpViewerScreen> {
                   const SizedBox(height: 16),
                   Text(_erro!, style: const TextStyle(color: Colors.white70), textAlign: TextAlign.center),
                   const SizedBox(height: 20),
-                  ElevatedButton(onPressed: () { setState(() { _erro = null; _conectando = true; _buf.clear(); }); _connect(); },
-                    child: const Text('Tentar novamente')),
+                  ElevatedButton(
+                    onPressed: () {
+                      setState(() { _erro = null; _conectando = true; _buf.clear(); });
+                      _connect();
+                    },
+                    child: const Text('Tentar novamente'),
+                  ),
                 ]))
-              : _frame == null
-                  ? const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              : _ctrl != null && _ctrl!.value.isInitialized
+                  ? AspectRatio(
+                      aspectRatio: _ctrl!.value.aspectRatio,
+                      child: VideoPlayer(_ctrl!),
+                    )
+                  : const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                       CircularProgressIndicator(color: Colors.white24),
                       SizedBox(height: 12),
-                      Text('À espera do primeiro frame...', style: TextStyle(color: Colors.white38)),
-                    ]))
-                  : SizedBox.expand(
-                      child: Image.memory(_frame!,
-                        gaplessPlayback: true,
-                        fit: BoxFit.contain,
-                      ),
-                    ),
+                      Text('À espera do primeiro clip com áudio...', style: TextStyle(color: Colors.white38)),
+                    ])),
     );
   }
 }
@@ -334,33 +382,26 @@ class BroadcastScreen extends StatefulWidget {
 }
 
 class _BroadcastScreenState extends State<BroadcastScreen> {
-  CameraController? _camCtrl;
+  CameraController?       _camCtrl;
   List<CameraDescription> _cameras = [];
-  bool _iniciando      = true;
-  bool _transmitindo   = false;
-  bool _parando        = false;
-  bool _trocandoCamera = false;
+  bool   _iniciando      = true;
+  bool   _transmitindo   = false;
+  bool   _gravando       = false;
+  bool   _trocandoCamera = false;
   String? _erro;
-  int _framesSent = 0;
-  int _fps        = 0;
-  int _fpsCount   = 0;
+  int    _clipsSent = 0;
+  int    _fps       = 0;
+
   Socket? _socket;
-  Timer?  _frameTimer;
-  Timer?  _fpsTimer;
 
   @override
   void initState() {
     super.initState();
     _initCamera();
-    _fpsTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() { _fps = _fpsCount; _fpsCount = 0; });
-    });
   }
 
   @override
   void dispose() {
-    _frameTimer?.cancel();
-    _fpsTimer?.cancel();
     _socket?.destroy();
     _camCtrl?.dispose();
     super.dispose();
@@ -372,7 +413,8 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
       if (_cameras.isEmpty) throw Exception('Nenhuma câmara encontrada.');
       final idx = _cameras.indexWhere((c) => c.lensDirection == CameraLensDirection.back);
       final cam = _cameras[idx >= 0 ? idx : 0];
-      final ctrl = CameraController(cam, ResolutionPreset.medium, enableAudio: false);
+      // enableAudio: true — o microfone é capturado junto com o vídeo
+      final ctrl = CameraController(cam, ResolutionPreset.medium, enableAudio: true);
       await ctrl.initialize();
       if (!mounted) return;
       setState(() { _camCtrl = ctrl; _iniciando = false; });
@@ -384,7 +426,6 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
   Future<void> _iniciarTransmissao() async {
     if (_camCtrl == null || _transmitindo) return;
     try {
-      // Ligar ao servidor TCP como STREAMER
       final socket = await Socket.connect(
         ApiConfig.tcpBroadcastHost,
         ApiConfig.tcpBroadcastPort,
@@ -394,42 +435,60 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
       socket.add(Uint8List.fromList(utf8.encode('STREAMER'.padRight(16))));
       socket.listen((_) {}, onError: (_) => _pararTransmissao(), onDone: () => _pararTransmissao());
 
-      setState(() { _transmitindo = true; _framesSent = 0; });
-
-      // Capturar e enviar um frame a cada ~100ms (≈10fps)
-      _frameTimer = Timer.periodic(const Duration(milliseconds: 100), (_) async {
-        if (!_transmitindo || _camCtrl == null) return;
-        try {
-          final file = await _camCtrl!.takePicture();
-          final bytes = await File(file.path).readAsBytes();
-          File(file.path).deleteSync();
-
-          // Protocolo: 4 bytes big-endian + JPEG
-          final sz = bytes.length;
-          final header = Uint8List(4)
-            ..[0] = (sz >> 24) & 0xff
-            ..[1] = (sz >> 16) & 0xff
-            ..[2] = (sz >> 8)  & 0xff
-            ..[3] =  sz        & 0xff;
-          _socket?.add(header);
-          _socket?.add(bytes);
-          _fpsCount++;
-          if (mounted) setState(() => _framesSent++);
-        } catch (_) {}
-      });
+      setState(() { _transmitindo = true; _clipsSent = 0; });
+      _recordLoop();
     } catch (e) {
       if (mounted) setState(() => _erro = 'Erro ao ligar: $e');
     }
   }
 
+  // Grava clips de 2s (vídeo + áudio) em loop e envia via TCP
+  Future<void> _recordLoop() async {
+    while (_transmitindo && _camCtrl != null) {
+      try {
+        setState(() => _gravando = true);
+        await _camCtrl!.startVideoRecording();
+        await Future.delayed(const Duration(seconds: 2));
+
+        if (!_transmitindo) {
+          // Parou durante a gravação — descartar
+          try { await _camCtrl!.stopVideoRecording(); } catch (_) {}
+          break;
+        }
+
+        final xFile = await _camCtrl!.stopVideoRecording();
+        setState(() => _gravando = false);
+
+        final bytes = await File(xFile.path).readAsBytes();
+        try { File(xFile.path).deleteSync(); } catch (_) {}
+
+        // Protocolo: 4 bytes big-endian tamanho + payload MP4
+        final sz = bytes.length;
+        final header = Uint8List(4)
+          ..[0] = (sz >> 24) & 0xff
+          ..[1] = (sz >> 16) & 0xff
+          ..[2] = (sz >> 8)  & 0xff
+          ..[3] =  sz        & 0xff;
+        _socket?.add(header);
+        _socket?.add(bytes);
+
+        if (mounted) setState(() { _clipsSent++; _fps = sz ~/ 1024; });
+      } catch (_) {
+        setState(() => _gravando = false);
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+    }
+  }
+
   Future<void> _pararTransmissao() async {
     if (!_transmitindo && _socket == null) return;
-    setState(() { _parando = true; });
-    _frameTimer?.cancel();
-    _frameTimer = null;
+    setState(() => _transmitindo = false);
+    if (_camCtrl != null && _gravando) {
+      try { await _camCtrl!.stopVideoRecording(); } catch (_) {}
+    }
     _socket?.destroy();
     _socket = null;
-    if (mounted) setState(() { _transmitindo = false; _parando = false; });
+    if (mounted) setState(() => _gravando = false);
   }
 
   Future<void> _trocarCamera() async {
@@ -438,42 +497,30 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
 
     final wasTransmitting = _transmitindo;
     if (wasTransmitting) {
-      _frameTimer?.cancel();
-      _frameTimer = null;
+      setState(() => _transmitindo = false);
+      if (_gravando) {
+        try { await _camCtrl!.stopVideoRecording(); } catch (_) {}
+        setState(() => _gravando = false);
+      }
     }
 
     final currentDir = _camCtrl!.description.lensDirection;
     await _camCtrl!.dispose();
+    _camCtrl = null;
 
     final next = _cameras.firstWhere(
       (c) => c.lensDirection != currentDir,
       orElse: () => _cameras.first,
     );
-
-    final ctrl = CameraController(next, ResolutionPreset.medium, enableAudio: false);
+    final ctrl = CameraController(next, ResolutionPreset.medium, enableAudio: true);
     await ctrl.initialize();
     if (!mounted) { ctrl.dispose(); return; }
+
     setState(() { _camCtrl = ctrl; _trocandoCamera = false; });
 
     if (wasTransmitting) {
-      _frameTimer = Timer.periodic(const Duration(milliseconds: 100), (_) async {
-        if (!_transmitindo || _camCtrl == null) return;
-        try {
-          final file = await _camCtrl!.takePicture();
-          final bytes = await File(file.path).readAsBytes();
-          File(file.path).deleteSync();
-          final sz = bytes.length;
-          final header = Uint8List(4)
-            ..[0] = (sz >> 24) & 0xff
-            ..[1] = (sz >> 16) & 0xff
-            ..[2] = (sz >> 8)  & 0xff
-            ..[3] =  sz        & 0xff;
-          _socket?.add(header);
-          _socket?.add(bytes);
-          _fpsCount++;
-          if (mounted) setState(() => _framesSent++);
-        } catch (_) {}
-      });
+      setState(() { _transmitindo = true; });
+      _recordLoop();
     }
   }
 
@@ -483,9 +530,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
       backgroundColor: Colors.black,
       body: _iniciando
           ? const Center(child: CircularProgressIndicator(color: Colors.redAccent))
-          : _erro != null
-              ? _buildErro()
-              : _buildBroadcaster(),
+          : _erro != null ? _buildErro() : _buildBroadcaster(),
     );
   }
 
@@ -508,21 +553,18 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
     return Stack(fit: StackFit.expand, children: [
       if (_camCtrl != null) CameraPreview(_camCtrl!),
 
-      // Gradiente topo
       Positioned(top: 0, left: 0, right: 0,
         child: Container(height: 120,
           decoration: const BoxDecoration(gradient: LinearGradient(
             begin: Alignment.topCenter, end: Alignment.bottomCenter,
             colors: [Colors.black87, Colors.transparent])))),
 
-      // Gradiente base
       Positioned(bottom: 0, left: 0, right: 0,
-        child: Container(height: 180,
+        child: Container(height: 200,
           decoration: const BoxDecoration(gradient: LinearGradient(
             begin: Alignment.bottomCenter, end: Alignment.topCenter,
             colors: [Colors.black87, Colors.transparent])))),
 
-      // Header
       Positioned(top: 0, left: 0, right: 0,
         child: SafeArea(
           child: Padding(
@@ -530,7 +572,8 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
             child: Row(children: [
               GestureDetector(
                 onTap: _transmitindo ? null : () => Navigator.pop(context),
-                child: Icon(Icons.close_rounded, color: _transmitindo ? Colors.white24 : Colors.white, size: 28),
+                child: Icon(Icons.close_rounded,
+                  color: _transmitindo ? Colors.white24 : Colors.white, size: 28),
               ),
               const SizedBox(width: 12),
               if (_transmitindo) ...[
@@ -540,10 +583,17 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                   child: const Text('🔴 AO VIVO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
                 ),
                 const SizedBox(width: 10),
-                Text('$_fps fps  •  $_framesSent frames',
+                Text('$_clipsSent clips  •  $_fps KB/clip',
                   style: const TextStyle(color: Colors.white70, fontSize: 12)),
               ],
               const Spacer(),
+              // Indicador de gravação activa
+              if (_gravando)
+                Container(
+                  width: 10, height: 10,
+                  margin: const EdgeInsets.only(right: 12),
+                  decoration: const BoxDecoration(color: Colors.redAccent, shape: BoxShape.circle),
+                ),
               if (_cameras.length > 1)
                 GestureDetector(
                   onTap: _trocandoCamera ? null : _trocarCamera,
@@ -556,49 +606,40 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
           ),
         )),
 
-      // Campo título
-      if (!_transmitindo)
-        Positioned(bottom: 140, left: 24, right: 24,
+      // Ícone de microfone activo
+      if (_transmitindo)
+        Positioned(bottom: 140, right: 24,
           child: Container(
-            decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: TextField(
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                hintText: 'Título da transmissão...',
-                hintStyle: TextStyle(color: Colors.white38),
-                border: InputBorder.none,
-              ),
-            ),
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
+            child: const Icon(Icons.mic_rounded, color: Colors.greenAccent, size: 22),
           )),
 
       // Botão principal
       Positioned(bottom: 48, left: 0, right: 0,
         child: Center(
-          child: _parando
-              ? const CircularProgressIndicator(color: Colors.white)
-              : GestureDetector(
-                  onTap: _transmitindo ? _pararTransmissao : _iniciarTransmissao,
-                  child: Container(
-                    width: 72, height: 72,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 4),
-                      color: _transmitindo ? Colors.white : Colors.redAccent,
-                    ),
-                    child: Icon(
-                      _transmitindo ? Icons.stop_rounded : Icons.videocam_rounded,
-                      color: _transmitindo ? Colors.redAccent : Colors.white,
-                      size: 36,
-                    ),
-                  ),
-                ),
+          child: GestureDetector(
+            onTap: _transmitindo ? _pararTransmissao : _iniciarTransmissao,
+            child: Container(
+              width: 72, height: 72,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 4),
+                color: _transmitindo ? Colors.white : Colors.redAccent,
+              ),
+              child: Icon(
+                _transmitindo ? Icons.stop_rounded : Icons.videocam_rounded,
+                color: _transmitindo ? Colors.redAccent : Colors.white,
+                size: 36,
+              ),
+            ),
+          ),
         )),
 
       if (!_transmitindo)
         const Positioned(bottom: 24, left: 0, right: 0,
           child: Center(
-            child: Text('Toca no botão para transmitir via TCP',
+            child: Text('Vídeo + áudio via TCP socket',
               style: TextStyle(color: Colors.white38, fontSize: 12)))),
     ]);
   }

@@ -1,14 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:video_player/video_player.dart';
 import 'package:http/http.dart' as http;
 import '../../config/api_config.dart';
 import '../../providers/auth_provider.dart';
-import '../../services/live_service.dart';
 
 // ─────────────────────────── VIEWER ──────────────────────────────────────────
 
@@ -20,14 +19,10 @@ class LiveScreen extends StatefulWidget {
 }
 
 class _LiveScreenState extends State<LiveScreen> {
-  bool _aoVivo        = false;
+  bool _aoVivo      = false;
   String? _titulo;
   String? _iniciadoEm;
-  bool _verificando   = true;
-
-  VideoPlayerController? _controller;
-  bool _playerReady   = false;
-  String? _erroPlayer;
+  bool _verificando = true;
 
   Timer? _pollTimer;
 
@@ -41,7 +36,6 @@ class _LiveScreenState extends State<LiveScreen> {
   @override
   void dispose() {
     _pollTimer?.cancel();
-    _controller?.dispose();
     super.dispose();
   }
 
@@ -51,49 +45,14 @@ class _LiveScreenState extends State<LiveScreen> {
       final res = await http.get(uri).timeout(const Duration(seconds: 5));
       if (!mounted) return;
       final data = jsonDecode(res.body) as Map<String, dynamic>;
-      final aoVivo = data['ao_vivo'] == true;
-
-      if (aoVivo && !_aoVivo) {
-        setState(() {
-          _aoVivo     = true;
-          _titulo     = data['titulo'] as String?;
-          _iniciadoEm = data['iniciadoEm'] as String?;
-          _verificando = false;
-        });
-        await _iniciarPlayer();
-      } else if (!aoVivo && _aoVivo) {
-        _controller?.dispose();
-        setState(() {
-          _aoVivo      = false;
-          _playerReady = false;
-          _controller  = null;
-          _erroPlayer  = null;
-          _verificando = false;
-        });
-      } else {
-        setState(() {
-          _aoVivo      = aoVivo;
-          _titulo      = data['titulo'] as String?;
-          _iniciadoEm  = data['iniciadoEm'] as String?;
-          _verificando = false;
-        });
-      }
+      setState(() {
+        _aoVivo      = data['ao_vivo'] == true;
+        _titulo      = data['titulo'] as String?;
+        _iniciadoEm  = data['iniciadoEm'] as String?;
+        _verificando = false;
+      });
     } catch (_) {
       if (mounted) setState(() => _verificando = false);
-    }
-  }
-
-  Future<void> _iniciarPlayer() async {
-    final hlsUrl = '${ApiConfig.mediaBaseUrl}/hls/live/index.m3u8';
-    final ctrl = VideoPlayerController.networkUrl(Uri.parse(hlsUrl));
-    try {
-      await ctrl.initialize();
-      await ctrl.play();
-      if (!mounted) { ctrl.dispose(); return; }
-      setState(() { _controller = ctrl; _playerReady = true; _erroPlayer = null; });
-    } catch (e) {
-      ctrl.dispose();
-      if (mounted) setState(() { _erroPlayer = e.toString(); _playerReady = false; });
     }
   }
 
@@ -106,7 +65,12 @@ class _LiveScreenState extends State<LiveScreen> {
   }
 
   void _abrirBroadcaster() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const BroadcastScreen()));
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const BroadcastScreen()))
+        .then((_) => _verificarStatus());
+  }
+
+  void _abrirViewer() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const TcpViewerScreen()));
   }
 
   @override
@@ -142,126 +106,43 @@ class _LiveScreenState extends State<LiveScreen> {
       ),
       body: _verificando
           ? const Center(child: CircularProgressIndicator(color: Colors.blueAccent))
-          : _aoVivo
-              ? _buildPlayer()
-              : _buildOffline(auth),
+          : _aoVivo ? _buildAoVivo() : _buildOffline(auth),
     );
   }
 
-  Widget _buildPlayer() {
-    return Column(children: [
-      Container(
-        color: const Color(0xFF0D0D1F),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(color: Colors.redAccent, borderRadius: BorderRadius.circular(6)),
-            child: const Text('🔴 AO VIVO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(_titulo ?? 'Transmissão ao Vivo',
-              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
-              overflow: TextOverflow.ellipsis),
-          ),
-          if (_iniciadoEm != null)
-            Text('desde ${_fmtHora(_iniciadoEm)}',
-              style: const TextStyle(color: Colors.white38, fontSize: 11)),
-        ]),
-      ),
-      Expanded(
-        child: _playerReady && _controller != null
-            ? _buildVideoControls()
-            : _erroPlayer != null
-                ? _buildErroPlayer()
-                : const Center(child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      CircularProgressIndicator(color: Colors.redAccent),
-                      SizedBox(height: 16),
-                      Text('A ligar ao stream...', style: TextStyle(color: Colors.white54)),
-                    ],
-                  )),
-      ),
-    ]);
-  }
-
-  Widget _buildVideoControls() {
-    final ctrl = _controller!;
-    return Column(children: [
-      AspectRatio(
-        aspectRatio: ctrl.value.aspectRatio > 0 ? ctrl.value.aspectRatio : 16 / 9,
-        child: VideoPlayer(ctrl),
-      ),
-      Container(
-        color: const Color(0xFF0D0D1F),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Column(children: [
-          VideoProgressIndicator(ctrl, allowScrubbing: true,
-            colors: const VideoProgressColors(
-              playedColor: Colors.redAccent, bufferedColor: Colors.white24, backgroundColor: Colors.white12)),
-          const SizedBox(height: 6),
-          Row(children: [
-            ValueListenableBuilder(
-              valueListenable: ctrl,
-              builder: (_, v, child) => IconButton(
-                icon: Icon(v.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded, color: Colors.white),
-                onPressed: () => v.isPlaying ? ctrl.pause() : ctrl.play(),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.replay_10_rounded, color: Colors.white70),
-              onPressed: () {
-                final pos = ctrl.value.position - const Duration(seconds: 10);
-                ctrl.seekTo(pos < Duration.zero ? Duration.zero : pos);
-              },
-            ),
-            IconButton(
-              icon: const Icon(Icons.forward_10_rounded, color: Colors.white70),
-              onPressed: () => ctrl.seekTo(ctrl.value.position + const Duration(seconds: 10)),
-            ),
-            const Spacer(),
-            ValueListenableBuilder(
-              valueListenable: ctrl,
-              builder: (_, v, child) => IconButton(
-                icon: Icon(v.volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded, color: Colors.white70),
-                onPressed: () => ctrl.setVolume(v.volume == 0 ? 1.0 : 0.0),
-              ),
-            ),
-            ValueListenableBuilder(
-              valueListenable: ctrl,
-              builder: (_, v, child) {
-                String fmt(Duration d) =>
-                    '${d.inMinutes.toString().padLeft(2, '0')}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
-                return Text('${fmt(v.position)} / ${fmt(v.duration)}',
-                  style: const TextStyle(color: Colors.white38, fontSize: 11));
-              },
-            ),
-            const SizedBox(width: 8),
-          ]),
-        ]),
-      ),
-    ]);
-  }
-
-  Widget _buildErroPlayer() {
+  Widget _buildAoVivo() {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          const Icon(Icons.signal_wifi_bad_rounded, color: Colors.redAccent, size: 48),
-          const SizedBox(height: 16),
-          const Text('Erro ao ligar ao stream', style: TextStyle(color: Colors.white, fontSize: 16)),
-          const SizedBox(height: 8),
-          Text(_erroPlayer ?? '', style: const TextStyle(color: Colors.white38, fontSize: 11), textAlign: TextAlign.center),
-          const SizedBox(height: 20),
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
-            icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Tentar novamente'),
-            onPressed: _iniciarPlayer,
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(color: Colors.redAccent, borderRadius: BorderRadius.circular(10)),
+            child: const Text('🔴 AO VIVO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
           ),
+          const SizedBox(height: 20),
+          Text(
+            _titulo ?? 'Transmissão ao Vivo',
+            style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          if (_iniciadoEm != null) ...[
+            const SizedBox(height: 8),
+            Text('Desde ${_fmtHora(_iniciadoEm)}',
+              style: const TextStyle(color: Colors.white38, fontSize: 13)),
+          ],
+          const SizedBox(height: 40),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+            ),
+            icon: const Icon(Icons.play_arrow_rounded, size: 28),
+            label: const Text('Assistir', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            onPressed: _abrirViewer,
+          ),
+          const SizedBox(height: 12),
+          const Text('Stream em tempo real via TCP', style: TextStyle(color: Colors.white24, fontSize: 11)),
         ]),
       ),
     );
@@ -312,7 +193,138 @@ class _LiveScreenState extends State<LiveScreen> {
   }
 }
 
-// ─────────────────────────── BROADCASTER ─────────────────────────────────────
+// ─────────────────────────── TCP VIEWER ──────────────────────────────────────
+
+class TcpViewerScreen extends StatefulWidget {
+  const TcpViewerScreen({super.key});
+
+  @override
+  State<TcpViewerScreen> createState() => _TcpViewerScreenState();
+}
+
+class _TcpViewerScreenState extends State<TcpViewerScreen> {
+  Socket?    _socket;
+  Uint8List? _frame;
+  String?    _erro;
+  bool       _conectando = true;
+  int        _fps        = 0;
+  int        _frameCount = 0;
+  Timer?     _fpsTimer;
+
+  // Buffer para montar frames do protocolo TCP
+  final List<int> _buf = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _connect();
+    _fpsTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() { _fps = _frameCount; _frameCount = 0; });
+    });
+  }
+
+  @override
+  void dispose() {
+    _fpsTimer?.cancel();
+    _socket?.destroy();
+    super.dispose();
+  }
+
+  Future<void> _connect() async {
+    try {
+      final socket = await Socket.connect(
+        ApiConfig.tcpBroadcastHost,
+        ApiConfig.tcpBroadcastPort,
+        timeout: const Duration(seconds: 8),
+      );
+      _socket = socket;
+
+      // Enviar role VIEWER (16 bytes com padding)
+      final role = 'VIEWER'.padRight(16);
+      socket.add(Uint8List.fromList(utf8.encode(role)));
+
+      if (mounted) setState(() => _conectando = false);
+
+      socket.listen(
+        (data) {
+          _buf.addAll(data);
+          _processBuffer();
+        },
+        onError: (_) { if (mounted) setState(() => _erro = 'Conexão perdida.'); },
+        onDone:  ()  { if (mounted) setState(() => _erro = 'Transmissão encerrada.'); },
+        cancelOnError: true,
+      );
+    } catch (e) {
+      if (mounted) setState(() { _conectando = false; _erro = e.toString(); });
+    }
+  }
+
+  void _processBuffer() {
+    while (_buf.length >= 4) {
+      final size = (_buf[0] << 24) | (_buf[1] << 16) | (_buf[2] << 8) | _buf[3];
+      if (_buf.length < 4 + size) break;
+      final jpeg = Uint8List.fromList(_buf.sublist(4, 4 + size));
+      _buf.removeRange(0, 4 + size);
+      _frameCount++;
+      if (mounted) setState(() => _frame = jpeg);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        title: Row(children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(color: Colors.redAccent, borderRadius: BorderRadius.circular(6)),
+            child: const Text('🔴 AO VIVO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
+          ),
+          const SizedBox(width: 10),
+          Text('$_fps fps', style: const TextStyle(color: Colors.white38, fontSize: 12)),
+        ]),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.close_rounded, color: Colors.white54),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ],
+      ),
+      body: _conectando
+          ? const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              CircularProgressIndicator(color: Colors.redAccent),
+              SizedBox(height: 16),
+              Text('A ligar ao stream...', style: TextStyle(color: Colors.white54)),
+            ]))
+          : _erro != null
+              ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  const Icon(Icons.signal_wifi_bad_rounded, color: Colors.redAccent, size: 48),
+                  const SizedBox(height: 16),
+                  Text(_erro!, style: const TextStyle(color: Colors.white70), textAlign: TextAlign.center),
+                  const SizedBox(height: 20),
+                  ElevatedButton(onPressed: () { setState(() { _erro = null; _conectando = true; _buf.clear(); }); _connect(); },
+                    child: const Text('Tentar novamente')),
+                ]))
+              : _frame == null
+                  ? const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      CircularProgressIndicator(color: Colors.white24),
+                      SizedBox(height: 12),
+                      Text('À espera do primeiro frame...', style: TextStyle(color: Colors.white38)),
+                    ]))
+                  : SizedBox.expand(
+                      child: Image.memory(_frame!,
+                        gaplessPlayback: true,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+    );
+  }
+}
+
+// ─────────────────────────── TCP BROADCASTER ─────────────────────────────────
 
 class BroadcastScreen extends StatefulWidget {
   const BroadcastScreen({super.key});
@@ -324,25 +336,32 @@ class BroadcastScreen extends StatefulWidget {
 class _BroadcastScreenState extends State<BroadcastScreen> {
   CameraController? _camCtrl;
   List<CameraDescription> _cameras = [];
-  bool _iniciando   = true;
-  bool _transmitindo = false;
+  bool _iniciando      = true;
+  bool _transmitindo   = false;
   bool _parando        = false;
   bool _trocandoCamera = false;
   String? _erro;
-  int _chunksEnviados = 0;
-  String _titulo = 'Transmissão ao Vivo';
-
-  Timer? _chunkTimer;
+  int _framesSent = 0;
+  int _fps        = 0;
+  int _fpsCount   = 0;
+  Socket? _socket;
+  Timer?  _frameTimer;
+  Timer?  _fpsTimer;
 
   @override
   void initState() {
     super.initState();
     _initCamera();
+    _fpsTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() { _fps = _fpsCount; _fpsCount = 0; });
+    });
   }
 
   @override
   void dispose() {
-    _chunkTimer?.cancel();
+    _frameTimer?.cancel();
+    _fpsTimer?.cancel();
+    _socket?.destroy();
     _camCtrl?.dispose();
     super.dispose();
   }
@@ -351,9 +370,9 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
     try {
       _cameras = await availableCameras();
       if (_cameras.isEmpty) throw Exception('Nenhuma câmara encontrada.');
-      final camBackIdx = _cameras.indexWhere((c) => c.lensDirection == CameraLensDirection.back);
-      final cam = _cameras[camBackIdx >= 0 ? camBackIdx : 0];
-      final ctrl = CameraController(cam, ResolutionPreset.medium, enableAudio: true);
+      final idx = _cameras.indexWhere((c) => c.lensDirection == CameraLensDirection.back);
+      final cam = _cameras[idx >= 0 ? idx : 0];
+      final ctrl = CameraController(cam, ResolutionPreset.medium, enableAudio: false);
       await ctrl.initialize();
       if (!mounted) return;
       setState(() { _camCtrl = ctrl; _iniciando = false; });
@@ -364,60 +383,98 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
 
   Future<void> _iniciarTransmissao() async {
     if (_camCtrl == null || _transmitindo) return;
-    setState(() { _transmitindo = true; _chunksEnviados = 0; });
-
-    final token = context.read<AuthProvider>().token;
-    await _gravarEEnviarChunk(token, titulo: _titulo);
-
-    // Chunk a cada 2 segundos
-    _chunkTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
-      if (_transmitindo) await _gravarEEnviarChunk(token);
-    });
-  }
-
-  Future<void> _gravarEEnviarChunk(String? token, {String? titulo}) async {
-    if (_camCtrl == null || !_camCtrl!.value.isInitialized) return;
     try {
-      await _camCtrl!.startVideoRecording();
-      await Future.delayed(const Duration(seconds: 2));
-      if (!_transmitindo) {
-        await _camCtrl!.stopVideoRecording();
-        return;
-      }
-      final file = await _camCtrl!.stopVideoRecording();
-      if (!mounted) return;
-      setState(() => _chunksEnviados++);
-      // Enviar em background — não bloqueia o próximo chunk
-      LiveService.uploadChunk(file.path, token: token, titulo: titulo).then((_) {
-        try { File(file.path).deleteSync(); } catch (_) {}
-      }).catchError((_) {});
+      // Ligar ao servidor TCP como STREAMER
+      final socket = await Socket.connect(
+        ApiConfig.tcpBroadcastHost,
+        ApiConfig.tcpBroadcastPort,
+        timeout: const Duration(seconds: 8),
+      );
+      _socket = socket;
+      socket.add(Uint8List.fromList(utf8.encode('STREAMER'.padRight(16))));
+      socket.listen((_) {}, onError: (_) => _pararTransmissao(), onDone: () => _pararTransmissao());
+
+      setState(() { _transmitindo = true; _framesSent = 0; });
+
+      // Capturar e enviar um frame a cada ~100ms (≈10fps)
+      _frameTimer = Timer.periodic(const Duration(milliseconds: 100), (_) async {
+        if (!_transmitindo || _camCtrl == null) return;
+        try {
+          final file = await _camCtrl!.takePicture();
+          final bytes = await File(file.path).readAsBytes();
+          File(file.path).deleteSync();
+
+          // Protocolo: 4 bytes big-endian + JPEG
+          final sz = bytes.length;
+          final header = Uint8List(4)
+            ..[0] = (sz >> 24) & 0xff
+            ..[1] = (sz >> 16) & 0xff
+            ..[2] = (sz >> 8)  & 0xff
+            ..[3] =  sz        & 0xff;
+          _socket?.add(header);
+          _socket?.add(bytes);
+          _fpsCount++;
+          if (mounted) setState(() => _framesSent++);
+        } catch (_) {}
+      });
     } catch (e) {
-      // Continua mesmo com erros pontuais
-      debugPrint('Chunk error: $e');
+      if (mounted) setState(() => _erro = 'Erro ao ligar: $e');
     }
   }
 
   Future<void> _pararTransmissao() async {
-    setState(() => _parando = true);
-    _chunkTimer?.cancel();
-    _chunkTimer = null;
+    if (!_transmitindo && _socket == null) return;
+    setState(() { _parando = true; });
+    _frameTimer?.cancel();
+    _frameTimer = null;
+    _socket?.destroy();
+    _socket = null;
+    if (mounted) setState(() { _transmitindo = false; _parando = false; });
+  }
 
-    // Capturar token antes dos awaits
-    final token = context.read<AuthProvider>().token;
+  Future<void> _trocarCamera() async {
+    if (_camCtrl == null || _cameras.length < 2 || _trocandoCamera) return;
+    setState(() => _trocandoCamera = true);
 
-    try {
-      if (_camCtrl?.value.isRecordingVideo == true) {
-        final file = await _camCtrl!.stopVideoRecording();
-        await LiveService.uploadChunk(file.path, token: token);
-        try { File(file.path).deleteSync(); } catch (_) {}
-      }
-    } catch (_) {}
+    final wasTransmitting = _transmitindo;
+    if (wasTransmitting) {
+      _frameTimer?.cancel();
+      _frameTimer = null;
+    }
 
-    try {
-      await LiveService.stopCameraLive(token: token);
-    } catch (_) {}
+    final currentDir = _camCtrl!.description.lensDirection;
+    await _camCtrl!.dispose();
 
-    if (mounted) Navigator.pop(context);
+    final next = _cameras.firstWhere(
+      (c) => c.lensDirection != currentDir,
+      orElse: () => _cameras.first,
+    );
+
+    final ctrl = CameraController(next, ResolutionPreset.medium, enableAudio: false);
+    await ctrl.initialize();
+    if (!mounted) { ctrl.dispose(); return; }
+    setState(() { _camCtrl = ctrl; _trocandoCamera = false; });
+
+    if (wasTransmitting) {
+      _frameTimer = Timer.periodic(const Duration(milliseconds: 100), (_) async {
+        if (!_transmitindo || _camCtrl == null) return;
+        try {
+          final file = await _camCtrl!.takePicture();
+          final bytes = await File(file.path).readAsBytes();
+          File(file.path).deleteSync();
+          final sz = bytes.length;
+          final header = Uint8List(4)
+            ..[0] = (sz >> 24) & 0xff
+            ..[1] = (sz >> 16) & 0xff
+            ..[2] = (sz >> 8)  & 0xff
+            ..[3] =  sz        & 0xff;
+          _socket?.add(header);
+          _socket?.add(bytes);
+          _fpsCount++;
+          if (mounted) setState(() => _framesSent++);
+        } catch (_) {}
+      });
+    }
   }
 
   @override
@@ -439,14 +496,9 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           const Icon(Icons.videocam_off_rounded, color: Colors.redAccent, size: 56),
           const SizedBox(height: 16),
-          const Text('Erro ao aceder à câmara', style: TextStyle(color: Colors.white, fontSize: 16)),
-          const SizedBox(height: 8),
-          Text(_erro!, style: const TextStyle(color: Colors.white38, fontSize: 12), textAlign: TextAlign.center),
+          Text(_erro!, style: const TextStyle(color: Colors.white70), textAlign: TextAlign.center),
           const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Voltar'),
-          ),
+          ElevatedButton(onPressed: () => Navigator.pop(context), child: const Text('Voltar')),
         ]),
       ),
     );
@@ -454,63 +506,44 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
 
   Widget _buildBroadcaster() {
     return Stack(fit: StackFit.expand, children: [
-      // Preview câmara
       if (_camCtrl != null) CameraPreview(_camCtrl!),
 
-      // Overlay escuro no topo e base
-      Positioned(
-        top: 0, left: 0, right: 0,
-        child: Container(
-          height: 120,
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter, end: Alignment.bottomCenter,
-              colors: [Colors.black87, Colors.transparent],
-            ),
-          ),
-        ),
-      ),
-      Positioned(
-        bottom: 0, left: 0, right: 0,
-        child: Container(
-          height: 180,
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.bottomCenter, end: Alignment.topCenter,
-              colors: [Colors.black87, Colors.transparent],
-            ),
-          ),
-        ),
-      ),
+      // Gradiente topo
+      Positioned(top: 0, left: 0, right: 0,
+        child: Container(height: 120,
+          decoration: const BoxDecoration(gradient: LinearGradient(
+            begin: Alignment.topCenter, end: Alignment.bottomCenter,
+            colors: [Colors.black87, Colors.transparent])))),
+
+      // Gradiente base
+      Positioned(bottom: 0, left: 0, right: 0,
+        child: Container(height: 180,
+          decoration: const BoxDecoration(gradient: LinearGradient(
+            begin: Alignment.bottomCenter, end: Alignment.topCenter,
+            colors: [Colors.black87, Colors.transparent])))),
 
       // Header
-      Positioned(
-        top: 0, left: 0, right: 0,
+      Positioned(top: 0, left: 0, right: 0,
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(children: [
-              // Botão fechar
               GestureDetector(
                 onTap: _transmitindo ? null : () => Navigator.pop(context),
-                child: const Icon(Icons.close_rounded, color: Colors.white, size: 28),
+                child: Icon(Icons.close_rounded, color: _transmitindo ? Colors.white24 : Colors.white, size: 28),
               ),
               const SizedBox(width: 12),
               if (_transmitindo) ...[
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.redAccent,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
+                  decoration: BoxDecoration(color: Colors.redAccent, borderRadius: BorderRadius.circular(8)),
                   child: const Text('🔴 AO VIVO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
                 ),
                 const SizedBox(width: 10),
-                Text('$_chunksEnviados segmentos',
+                Text('$_fps fps  •  $_framesSent frames',
                   style: const TextStyle(color: Colors.white70, fontSize: 12)),
               ],
               const Spacer(),
-              // Trocar câmara (sempre disponível quando há 2+ câmaras)
               if (_cameras.length > 1)
                 GestureDetector(
                   onTap: _trocandoCamera ? null : _trocarCamera,
@@ -521,18 +554,13 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                 ),
             ]),
           ),
-        ),
-      ),
+        )),
 
-      // Campo título (antes de transmitir)
+      // Campo título
       if (!_transmitindo)
-        Positioned(
-          bottom: 140, left: 24, right: 24,
+        Positioned(bottom: 140, left: 24, right: 24,
           child: Container(
-            decoration: BoxDecoration(
-              color: Colors.black54,
-              borderRadius: BorderRadius.circular(12),
-            ),
+            decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: TextField(
               style: const TextStyle(color: Colors.white),
@@ -541,90 +569,37 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                 hintStyle: TextStyle(color: Colors.white38),
                 border: InputBorder.none,
               ),
-              onChanged: (v) => _titulo = v.isEmpty ? 'Transmissão ao Vivo' : v,
             ),
-          ),
-        ),
+          )),
 
-      // Botões principais
-      Positioned(
-        bottom: 48, left: 0, right: 0,
+      // Botão principal
+      Positioned(bottom: 48, left: 0, right: 0,
         child: Center(
           child: _parando
               ? const CircularProgressIndicator(color: Colors.white)
-              : _transmitindo
-                  ? GestureDetector(
-                      onTap: _pararTransmissao,
-                      child: Container(
-                        width: 72, height: 72,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 4),
-                          color: Colors.redAccent,
-                        ),
-                        child: const Icon(Icons.stop_rounded, color: Colors.white, size: 36),
-                      ),
-                    )
-                  : GestureDetector(
-                      onTap: _iniciarTransmissao,
-                      child: Container(
-                        width: 72, height: 72,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 4),
-                          color: Colors.redAccent,
-                        ),
-                        child: const Icon(Icons.videocam_rounded, color: Colors.white, size: 36),
-                      ),
+              : GestureDetector(
+                  onTap: _transmitindo ? _pararTransmissao : _iniciarTransmissao,
+                  child: Container(
+                    width: 72, height: 72,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 4),
+                      color: _transmitindo ? Colors.white : Colors.redAccent,
                     ),
-        ),
-      ),
+                    child: Icon(
+                      _transmitindo ? Icons.stop_rounded : Icons.videocam_rounded,
+                      color: _transmitindo ? Colors.redAccent : Colors.white,
+                      size: 36,
+                    ),
+                  ),
+                ),
+        )),
 
-      // Dica (antes de transmitir)
       if (!_transmitindo)
-        const Positioned(
-          bottom: 24, left: 0, right: 0,
+        const Positioned(bottom: 24, left: 0, right: 0,
           child: Center(
-            child: Text('Toca no botão para iniciar a transmissão',
-              style: TextStyle(color: Colors.white54, fontSize: 12)),
-          ),
-        ),
+            child: Text('Toca no botão para transmitir via TCP',
+              style: TextStyle(color: Colors.white38, fontSize: 12)))),
     ]);
-  }
-
-  Future<void> _trocarCamera() async {
-    if (_camCtrl == null || _cameras.length < 2 || _trocandoCamera) return;
-    setState(() => _trocandoCamera = true);
-
-    final currentDir = _camCtrl!.description.lensDirection;
-
-    // Parar gravação activa se a houver
-    bool estaGravando = _camCtrl!.value.isRecordingVideo;
-    if (estaGravando) {
-      try { await _camCtrl!.stopVideoRecording(); } catch (_) {}
-    }
-    _chunkTimer?.cancel();
-
-    await _camCtrl!.dispose();
-
-    // Seleccionar câmara com direcção oposta
-    final next = _cameras.firstWhere(
-      (c) => c.lensDirection != currentDir,
-      orElse: () => _cameras.firstWhere((c) => c.lensDirection == currentDir),
-    );
-
-    final ctrl = CameraController(next, ResolutionPreset.medium, enableAudio: true);
-    await ctrl.initialize();
-    if (!mounted) { ctrl.dispose(); return; }
-    setState(() { _camCtrl = ctrl; _trocandoCamera = false; });
-
-    // Retomar gravação se estava a transmitir
-    if (_transmitindo) {
-      final token = context.read<AuthProvider>().token;
-      await _gravarEEnviarChunk(token);
-      _chunkTimer = Timer.periodic(const Duration(seconds: 4), (_) async {
-        if (_transmitindo) await _gravarEEnviarChunk(token);
-      });
-    }
   }
 }

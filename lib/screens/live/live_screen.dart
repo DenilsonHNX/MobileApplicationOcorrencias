@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:video_player/video_player.dart';
@@ -238,6 +239,7 @@ class _TcpViewerScreenState extends State<TcpViewerScreen> {
   String?  _erro;
   bool     _conectando     = true;
   int      _chunksRecebidos = 0;
+  Timer?   _timeoutTimer;
 
   final List<int>  _buf   = [];
   final Queue<File> _queue = Queue();
@@ -249,10 +251,17 @@ class _TcpViewerScreenState extends State<TcpViewerScreen> {
   void initState() {
     super.initState();
     _connect();
+    // Timeout: se nenhum clip chegar em 30s, mostrar aviso
+    _timeoutTimer = Timer(const Duration(seconds: 30), () {
+      if (mounted && _chunksRecebidos == 0 && _erro == null) {
+        setState(() => _erro = 'Sem transmissão activa neste canal.\nVerifica se o broadcaster está a transmitir.');
+      }
+    });
   }
 
   @override
   void dispose() {
+    _timeoutTimer?.cancel();
     _socket?.destroy();
     _ctrl?.dispose();
     for (final f in _queue) { try { f.deleteSync(); } catch (_) {} }
@@ -453,13 +462,17 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
 
   Future<void> _initCamera() async {
     try {
+      // Pedir câmara + microfone explicitamente no Android
+      await Permission.camera.request();
+      final micOk = (await Permission.microphone.request()).isGranted;
+
       _cameras = await availableCameras();
       if (_cameras.isEmpty) throw Exception('Nenhuma câmara encontrada.');
       final idx = _cameras.indexWhere((c) => c.lensDirection == CameraLensDirection.back);
       final ctrl = CameraController(
         _cameras[idx >= 0 ? idx : 0],
         ResolutionPreset.medium,
-        enableAudio: true,
+        enableAudio: micOk, // áudio só se tiver permissão
       );
       await ctrl.initialize();
       if (!mounted) return;
@@ -509,6 +522,8 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
         final bytes = await File(xFile.path).readAsBytes();
         try { File(xFile.path).deleteSync(); } catch (_) {}
 
+        if (bytes.isEmpty) continue; // clip vazio — ignorar
+
         final sz = bytes.length;
         final header = Uint8List(4)
           ..[0] = (sz >> 24) & 0xff
@@ -519,9 +534,9 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
         _socket?.add(bytes);
 
         if (mounted) setState(() { _clipsSent++; _kbUltimo = sz ~/ 1024; });
-      } catch (_) {
-        setState(() => _gravando = false);
-        await Future.delayed(const Duration(milliseconds: 200));
+      } catch (e) {
+        if (mounted) setState(() { _gravando = false; _erro = 'Erro na gravação: $e'; });
+        break; // mostrar erro em vez de ciclar silenciosamente
       }
     }
   }

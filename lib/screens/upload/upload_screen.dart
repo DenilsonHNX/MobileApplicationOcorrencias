@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -61,17 +60,6 @@ class _UploadScreenState extends State<UploadScreen> {
     );
     if (picked == null) return;
     await _setVideoFile(File(picked.path));
-  }
-
-  Future<void> _pickVideoFromFiles() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.video,
-      allowMultiple: false,
-    );
-    if (result == null || result.files.isEmpty) return;
-    final path = result.files.single.path;
-    if (path == null) return;
-    await _setVideoFile(File(path));
   }
 
   Future<void> _setVideoFile(File file) async {
@@ -151,14 +139,9 @@ class _UploadScreenState extends State<UploadScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_rounded, color: Colors.blueAccent),
-              title: const Text('Escolher da galeria', style: TextStyle(color: Colors.white)),
+              title: const Text('Galeria / Ficheiros', style: TextStyle(color: Colors.white)),
+              subtitle: const Text('Galeria, Downloads, Drive, SD Card...', style: TextStyle(color: Colors.white38, fontSize: 12)),
               onTap: () { Navigator.pop(context); _pickVideo(ImageSource.gallery); },
-            ),
-            ListTile(
-              leading: const Icon(Icons.folder_open_rounded, color: Colors.blueAccent),
-              title: const Text('Escolher de ficheiros', style: TextStyle(color: Colors.white)),
-              subtitle: const Text('Downloads, Drive, SD Card...', style: TextStyle(color: Colors.white38, fontSize: 12)),
-              onTap: () { Navigator.pop(context); _pickVideoFromFiles(); },
             ),
             const SizedBox(height: 8),
           ],

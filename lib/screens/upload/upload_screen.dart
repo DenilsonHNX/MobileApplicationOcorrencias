@@ -35,31 +35,33 @@ class _UploadScreenState extends State<UploadScreen> {
     super.dispose();
   }
 
-  Future<bool> _checkPermission(ImageSource source) async {
-    final Permission perm =
-        source == ImageSource.camera ? Permission.camera : Permission.videos;
-    final status = await perm.request();
-    if (status.isGranted) return true;
-    if (status.isPermanentlyDenied) {
-      _showSnack('Permissão negada permanentemente. Active nas definições.');
-      await openAppSettings();
-    } else {
-      _showSnack(source == ImageSource.camera
-          ? 'Permissão de câmara necessária.'
-          : 'Permissão de armazenamento necessária.');
-    }
-    return false;
-  }
-
   Future<void> _pickVideo(ImageSource source) async {
-    if (!await _checkPermission(source)) return;
+    // Câmara: verificar permissão manualmente
+    if (source == ImageSource.camera) {
+      final status = await Permission.camera.request();
+      if (!status.isGranted) {
+        if (status.isPermanentlyDenied) {
+          _showSnack('Permissão negada permanentemente. Active nas definições.');
+          await openAppSettings();
+        } else {
+          _showSnack('Permissão de câmara necessária.');
+        }
+        return;
+      }
+    }
 
-    final picked = await _picker.pickVideo(
-      source: source,
-      maxDuration: const Duration(minutes: 15),
-    );
-    if (picked == null) return;
-    await _setVideoFile(File(picked.path));
+    // Galeria: o image_picker gere as suas próprias permissões internamente
+    // (READ_EXTERNAL_STORAGE no Android ≤12, READ_MEDIA_VIDEO no Android 13+)
+    try {
+      final picked = await _picker.pickVideo(
+        source: source,
+        maxDuration: const Duration(minutes: 15),
+      );
+      if (picked == null) return;
+      await _setVideoFile(File(picked.path));
+    } catch (e) {
+      _showSnack('Erro ao selecionar vídeo. Verifique as permissões nas definições.');
+    }
   }
 
   Future<void> _setVideoFile(File file) async {

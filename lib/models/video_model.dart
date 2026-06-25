@@ -73,7 +73,8 @@ class VideoModel {
   }
 
   String get fullStreamUrl {
-    if (hlsUrlFull != null && hlsUrlFull!.isNotEmpty) return hlsUrlFull!;
+    // hlsUrlFull usa HTTPS com mTLS que o ExoPlayer/AVPlayer não consegue verificar;
+    // usa sempre o stream HTTP directo.
     if (streamUrlFull != null && streamUrlFull!.isNotEmpty) return streamUrlFull!;
     return ApiConfig.streamUrl(id);
   }

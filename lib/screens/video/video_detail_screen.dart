@@ -5,7 +5,6 @@ import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 import '../../config/api_config.dart';
 import '../../models/video_model.dart';
-import '../../services/video_service.dart';
 
 class VideoDetailScreen extends StatefulWidget {
   final VideoModel video;
@@ -21,6 +20,7 @@ class _VideoDetailScreenState extends State<VideoDetailScreen> {
   bool _showControls = true;
   bool _downloading = false;
   double _volume = 1.0;
+  String? _erro;
 
   @override
   void initState() {
@@ -29,12 +29,8 @@ class _VideoDetailScreenState extends State<VideoDetailScreen> {
   }
 
   Future<void> _loadVideo() async {
-    VideoModel video = widget.video;
-    try {
-      video = await VideoService.getVideo(widget.video.id);
-    } catch (_) {}
-
-    final url = video.fullStreamUrl;
+    // Usa sempre o URL HTTP directo — hlsUrl usa HTTPS/mTLS que o player não suporta
+    final url = ApiConfig.streamUrl(widget.video.id);
     _ctrl = VideoPlayerController.networkUrl(Uri.parse(url));
     try {
       await _ctrl!.initialize();
@@ -42,9 +38,9 @@ class _VideoDetailScreenState extends State<VideoDetailScreen> {
       _ctrl!.setVolume(_volume);
       _ctrl!.play();
       _ctrl!.addListener(() { if (mounted) setState(() {}); });
-      if (mounted) setState(() => _initialized = true);
-    } catch (_) {
-      if (mounted) setState(() => _initialized = false);
+      if (mounted) setState(() { _initialized = true; _erro = null; });
+    } catch (e) {
+      if (mounted) setState(() { _initialized = false; _erro = e.toString(); });
     }
   }
 
@@ -195,7 +191,32 @@ class _VideoDetailScreenState extends State<VideoDetailScreen> {
               const Center(child: CircularProgressIndicator(color: Colors.white)),
 
             if (!_initialized)
-              const Center(child: CircularProgressIndicator(color: Colors.white)),
+              Center(
+                child: _erro != null
+                    ? Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.error_outline_rounded,
+                                color: Colors.redAccent, size: 40),
+                            const SizedBox(height: 12),
+                            Text(_erro!,
+                                style: const TextStyle(
+                                    color: Colors.white70, fontSize: 12),
+                                textAlign: TextAlign.center),
+                            const SizedBox(height: 12),
+                            ElevatedButton(
+                              onPressed: _loadVideo,
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.blueAccent),
+                              child: const Text('Tentar novamente'),
+                            ),
+                          ],
+                        ),
+                      )
+                    : const CircularProgressIndicator(color: Colors.white),
+              ),
 
             // ── Controlos + info ─────────────────────────────────
             AnimatedOpacity(

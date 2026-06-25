@@ -58,10 +58,22 @@ class _VideoPlayerItemState extends State<VideoPlayerItem> {
   void _onVideoUpdate() { if (mounted) setState(() {}); }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Pausa quando o tab do IndexedStack fica invisível (Visibility.of detecta isso)
+    final isVisible = Visibility.of(context);
+    if (!isVisible) {
+      _controller?.pause();
+    } else if (isVisible && widget.isActive && _initialized && !_paused) {
+      _controller?.play();
+    }
+  }
+
+  @override
   void didUpdateWidget(VideoPlayerItem old) {
     super.didUpdateWidget(old);
     if (old.isActive != widget.isActive) {
-      if (widget.isActive) {
+      if (widget.isActive && Visibility.of(context)) {
         _controller?.play();
         context.read<VideoProvider>().incrementarVisualizacoes(widget.index);
       } else {
